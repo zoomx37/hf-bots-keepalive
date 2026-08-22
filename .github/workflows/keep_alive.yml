@@ -21,7 +21,7 @@ jobs:
           import os
           api = HfApi(token=os.environ['HF_TOKEN'])
           
-          spaces = ['opion2008/criminal-bot', 'opion2008/rslaw-bot', 'opion2008/НАЗВАНИЕ_КУПИДОНА']
+          spaces = ['opion2008/criminal-bot', 'opion2008/rslaw-bot', 'opion2008/cupidon']
           
           for space in spaces:
               try:
