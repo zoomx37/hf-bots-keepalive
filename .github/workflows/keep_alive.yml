@@ -1,32 +1,29 @@
-name: Auto Restart HuggingFace Bots
+name: Run Autonomous QA & Keepalive Agent
 
 on:
   schedule:
-    - cron: '0 0,12 * * *' # Каждые 12 часов
-  workflow_dispatch: # Кнопка для ручного запуска
+    - cron: '0 */6 * * *' # Запуск каждые 6 часов
+  workflow_dispatch: # Кнопка для ручного запуска в любой момент
 
 jobs:
-  restart-spaces:
+  run-agent:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Hugging Face Hub
-        run: pip install huggingface_hub
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Restart Spaces via API
+      - name: Setup Python
+        uses: setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests huggingface_hub
+
+      - name: Run Agent Script
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          python -c "
-          from huggingface_hub import HfApi
-          import os
-          api = HfApi(token=os.environ['HF_TOKEN'])
-          
-          spaces = ['opion2008/criminal-bot', 'opion2008/rslaw-bot', 'opion2008/cupidon']
-          
-          for space in spaces:
-              try:
-                  api.restart_space(repo_id=space)
-                  print(f'Successfully restarted {space}')
-              except Exception as e:
-                  print(f'Error restarting {space}: {e}')
-          "
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: python cupid_qa_agent.py
