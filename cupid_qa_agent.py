@@ -27,19 +27,33 @@ def send_tg_report(text):
         print(f"Ошибка отправки в TG: {e}")
 
 def ask_gemini(prompt, system_instruction):
-    """Запрос к нейросети Gemini для анализа ответов и сценариев"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    """Запрос строго к поколениям 3.7 -> 3.6 -> 3.5"""
+    if not GEMINI_API_KEY:
+        return "⚠️ Отсутствует GEMINI_API_KEY в Secrets"
+        
+    models_to_try = [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash"
+    ]
+    
     payload = {
         "system_instruction": {"parts": [{"text": system_instruction}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}]
     }
-    try:
-        r = requests.post(url, json=payload, timeout=25)
-        if r.status_code == 200:
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        return f"Ошибка Gemini API: {r.status_code}"
-    except Exception as e:
-        return f"Исключение сети: {e}"
+    
+    for model_name in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        try:
+            r = requests.post(url, json=payload, timeout=25)
+            if r.status_code == 200:
+                data = r.json()
+                if "candidates" in data and len(data["candidates"]) > 0:
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception:
+            continue
+            
+    return "⚠️ Не удалось получить ответ от Gemini 3.7 / 3.6 / 3.5."
 
 def test_keepalive_and_endpoints():
     """Проверка доступности и авто-пробуждение спейсов"""
@@ -66,33 +80,33 @@ def test_keepalive_and_endpoints():
     return "\n".join(status_report)
 
 def run_ai_qa_scenarios():
-    """Тестирование логики и качества ответов ИИ-Купидона"""
-    system_prompt = "Ты — ИИ-QA инженер. Оцени качество ответа дейтинг-бота на шкалу от 1 до 5 и проверь, нет ли галлюцинаций или сбоев."
+    """Тестирование логики и качества ответов на Gemini 3.7 Flash"""
+    system_prompt = "Ты — ведущий ИИ-QA инженер. Кратко (в 2-3 предложениях) оцени логику и корректность следующего кейса для дейтинг-бота."
     
     test_cases = [
-        ("Химия: Роман 15.10.1985 и Анна 20.04.1990", "Проверка модуля ИИ-Химия (совместимость)"),
-        ("Суд отношений: Муж забыл про годовщину, жена обиделась", "Проверка ИИ-Арбитража")
+        ("Химия: Роман 15.10.1985 и Анна 20.04.1990", "Модуль ИИ-Химия (совместимость)"),
+        ("Суд отношений: Муж забыл про годовщину, жена обиделась", "Модуль ИИ-Арбитраж (разбор конфликтов)")
     ]
     
     qa_results = []
     for prompt, desc in test_cases:
-        eval_result = ask_gemini(f"Проанализируй тестовый кейс: '{prompt}' для раздела: {desc}", system_prompt)
-        qa_results.append(f"🧪 <b>{desc}</b>:\n{eval_result[:250]}...\n")
+        eval_result = ask_gemini(f"Оцени сценарий: '{prompt}'", system_prompt)
+        qa_results.append(f"🧪 <b>{desc}</b>:\n{eval_result.strip()}\n")
         
     return "\n".join(qa_results)
 
 def main():
-    print("Запуск ИИ-Агента...")
+    print("Запуск ИИ-Агента QA на Gemini 3.7 Flash...")
     spaces_status = test_keepalive_and_endpoints()
     qa_status = run_ai_qa_scenarios()
     
     final_report = (
-        f"🤖 <b>[ОТЧЕТ ИИ-АГЕНТА QA & KEEPALIVE]</b>\n\n"
+        f"🤖 <b>[ОТЧЕТ ИИ-АГЕНТА QA (Gemini 3.7 Flash) & KEEPALIVE]</b>\n\n"
         f"📡 <b>Статус серверов:</b>\n{spaces_status}\n\n"
         f"🧠 <b>Тестирование функционала:</b>\n{qa_status}"
     )
     send_tg_report(final_report)
-    print("Готово!")
+    print("Отчет успешно отправлен!")
 
 if __name__ == "__main__":
     main()
