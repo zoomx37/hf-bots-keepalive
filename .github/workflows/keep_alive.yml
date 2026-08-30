@@ -3,7 +3,10 @@ name: Run Autonomous QA & Keepalive Agent
 on:
   schedule:
     - cron: '0 */6 * * *' # Запуск каждые 6 часов
-  workflow_dispatch: # Кнопка для ручного запуска в любой момент
+  workflow_dispatch: # Ручной запуск в любой момент
+
+permissions:
+  contents: write
 
 jobs:
   run-agent:
@@ -27,3 +30,11 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
         run: python cupid_qa_agent.py
+
+      - name: Save QA History
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add qa_history.json || true
+          git commit -m "Update QA history [skip ci]" || true
+          git push || true
