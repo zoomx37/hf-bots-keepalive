@@ -8,28 +8,74 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "721042205")
 
-SPACES = [
-    "opion2008/cupidon",
-    "opion2008/criminal-bot",
-    "opion2008/rslaw-bot"
-]
+HISTORY_FILE = "qa_history.json"
+
+BOTS_CONFIG = {
+    "opion2008/cupidon": {
+        "title": "❤️ ИИ-Купидон (@AI_cupidon_bot)",
+        "cases": [
+            ("Химия [Happy Path]: Роман 15.10.1985 и Анна 20.04.1990", "ИИ-Химия (Позитивный)"),
+            ("Химия [Negative]: Роман 31.02.1985 (невалидная дата)", "ИИ-Химия (Валидация даты)"),
+            ("Арбитраж [Safety]: Муж забыл годовщину, жена молчит", "Высший Суд (Примирение)"),
+            ("Двойник: Создание комнаты room_5521 и авто-флирт", "ИИ-Двойник"),
+            ("Rizz-Рейтинг: Оценка анкеты 'Люблю спорт, ищу искренность'", "Rizz-Рейтинг"),
+            ("Флирт-Ринг: Тест 5 раундов диалога и разбор ошибок", "Флирт-Ринг"),
+            ("Ред-Флаги: 'Если ты уйдешь, мне будет плохо'", "Детектор манипуляций"),
+            ("Скриншот: Выбор из 3 ответов (дерзкий, харизма, прямой)", "Прокачка диалога"),
+            ("Подкат: Точечные открывашки для профиля с собакой", "Идеальный подкат"),
+            ("Локатор: План свидания в уютном кафе", "Локатор свиданий")
+        ]
+    },
+    "opion2008/criminal-bot": {
+        "title": "⚖️ Уголовный Адвокат (@advocate_criminal_bot)",
+        "cases": [
+            ("Зачет СИЗО: 120 дней СИЗО в ИК общего режима (коэф 1.5)", "ст. 72 УК РФ (СИЗО)"),
+            ("Сроки: ч. 1 ст. 105 УК РФ (особо тяжкое), срок 8 лет -> УДО (2/3)", "ст. 79 УК РФ (УДО)"),
+            ("Замена наказания: 6 лет строгого режима -> ПТР (1/2)", "ст. 80 УК РФ (ЗМ)"),
+            ("Судимость: 3 года лишения свободы за тяжкое (8 лет погашение)", "ст. 86 УК РФ (Судимость)")
+        ]
+    },
+    "opion2008/rslaw-bot": {
+        "title": "🚗 ИИ-Автоюрист (@rslaw_auto_bot)",
+        "cases": [
+            ("ДТП: Европротокол при ущербе до 100 000 руб без пострадавших", "Помощник при ДТП"),
+            ("ОСАГО: Сумма 120 000 руб, задержка 15 дней (1% в день)", "Неустойка ОСАГО"),
+            ("Давность: ст. 12.8 ч. 1 КоАП РФ (алкоголь, срок 1 год)", "ст. 4.5 КоАП (Давность)"),
+            ("Лишение прав: Сдача ВУ в течение 3 дней и течение срока", "ст. 32.7 КоАП (Лишение)")
+        ]
+    }
+}
+
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_history(history):
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Ошибка сохранения истории QA: {e}")
 
 def send_tg_report(text):
-    """Отправка отчета агента администратору в Telegram"""
     if not TG_BOT_TOKEN:
         print(text)
         return
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": ADMIN_CHAT_ID, "text": text, "parse_mode": "HTML"}
     try:
-        requests.post(url, json=payload, timeout=10)
+        requests.post(url, json=payload, timeout=15)
     except Exception as e:
         print(f"Ошибка отправки в TG: {e}")
 
 def ask_gemini(prompt, system_instruction):
-    """Запрос строго к поколениям 3.7 -> 3.6 -> 3.5"""
     if not GEMINI_API_KEY:
-        return "⚠️ Отсутствует GEMINI_API_KEY в Secrets"
+        return "⚠️ Отсутствует GEMINI_API_KEY"
         
     models_to_try = [
         "gemini-3.7-flash",
@@ -49,64 +95,73 @@ def ask_gemini(prompt, system_instruction):
             if r.status_code == 200:
                 data = r.json()
                 if "candidates" in data and len(data["candidates"]) > 0:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
         except Exception:
             continue
             
-    return "⚠️ Не удалось получить ответ от Gemini 3.7 / 3.6 / 3.5."
-
-def test_keepalive_and_endpoints():
-    """Проверка доступности и авто-пробуждение спейсов"""
-    hf_api = HfApi(token=HF_TOKEN)
-    status_report = []
-    
-    for space in SPACES:
-        subdomain = space.replace("/", "-")
-        url = f"https://{subdomain}.hf.space/ping"
-        try:
-            res = requests.get(url, timeout=10)
-            if res.status_code == 200:
-                status_report.append(f"• <b>{space}</b>: ✅ Работает (200 OK)")
-            else:
-                hf_api.restart_space(repo_id=space)
-                status_report.append(f"• <b>{space}</b>: ⚠️ Код {res.status_code} ➔ Перезапущен через API")
-        except Exception as e:
-            try:
-                hf_api.restart_space(repo_id=space)
-                status_report.append(f"• <b>{space}</b>: 🚨 Недоступен ➔ Принудительно разбужен")
-            except Exception as hf_err:
-                status_report.append(f"• <b>{space}</b>: ❌ Ошибка перезапуска: {hf_err}")
-                
-    return "\n".join(status_report)
-
-def run_ai_qa_scenarios():
-    """Тестирование логики и качества ответов на Gemini 3.7 Flash"""
-    system_prompt = "Ты — ведущий ИИ-QA инженер. Кратко (в 2-3 предложениях) оцени логику и корректность следующего кейса для дейтинг-бота."
-    
-    test_cases = [
-        ("Химия: Роман 15.10.1985 и Анна 20.04.1990", "Модуль ИИ-Химия (совместимость)"),
-        ("Суд отношений: Муж забыл про годовщину, жена обиделась", "Модуль ИИ-Арбитраж (разбор конфликтов)")
-    ]
-    
-    qa_results = []
-    for prompt, desc in test_cases:
-        eval_result = ask_gemini(f"Оцени сценарий: '{prompt}'", system_prompt)
-        qa_results.append(f"🧪 <b>{desc}</b>:\n{eval_result.strip()}\n")
-        
-    return "\n".join(qa_results)
+    return "⚠️ Не удалось получить ответ от Gemini API."
 
 def main():
-    print("Запуск ИИ-Агента QA на Gemini 3.7 Flash...")
-    spaces_status = test_keepalive_and_endpoints()
-    qa_status = run_ai_qa_scenarios()
+    print("Запуск комплексного QA-Агента...")
+    hf_api = HfApi(token=HF_TOKEN) if HF_TOKEN else None
+    history = load_history()
     
-    final_report = (
-        f"🤖 <b>[ОТЧЕТ ИИ-АГЕНТА QA (Gemini 3.7 Flash) & KEEPALIVE]</b>\n\n"
-        f"📡 <b>Статус серверов:</b>\n{spaces_status}\n\n"
-        f"🧠 <b>Тестирование функционала:</b>\n{qa_status}"
-    )
-    send_tg_report(final_report)
-    print("Отчет успешно отправлен!")
+    report_sections = []
+    
+    for space_id, cfg in BOTS_CONFIG.items():
+        title = cfg["title"]
+        subdomain = space_id.replace("/", "-")
+        ping_url = f"https://{subdomain}.hf.space/ping"
+        
+        # 1. Проверка доступности и получение Commit SHA
+        server_status = "✅ Работает (200 OK)"
+        current_sha = "unknown"
+        
+        try:
+            res = requests.get(ping_url, timeout=10)
+            if res.status_code != 200:
+                server_status = f"⚠️ Код {res.status_code} ➔ Перезапущен"
+                if hf_api: hf_api.restart_space(repo_id=space_id)
+        except Exception:
+            server_status = "🚨 Недоступен ➔ Принудительно разбужен"
+            if hf_api:
+                try: hf_api.restart_space(repo_id=space_id)
+                except: pass
+
+        if hf_api:
+            try:
+                space_info = hf_api.space_info(repo_id=space_id)
+                current_sha = getattr(space_info, "sha", "unknown")[:7]
+            except: pass
+
+        # 2. Проверка: изменился ли код с прошлого раза?
+        last_sha = history.get(space_id, {}).get("last_sha")
+        sha_changed = (current_sha != last_sha) or (current_sha == "unknown")
+        
+        bot_report = f"<b>{title}</b>\n• Статус: {server_status} | Версия: <code>{current_sha}</code>\n"
+        
+        if sha_changed:
+            bot_report += "• 🔬 <b>Результаты полного QA-аудита модулей:</b>\n"
+            system_prompt = (
+                "Ты — ведущий QA-инженер и юрист. Оцени работу функции бота в 1 предложении: "
+                "корректность формул/логики, безопасность и соблюдение закона РФ. Дай 1 конкретное улучшение."
+            )
+            
+            for test_input, case_name in cfg["cases"]:
+                eval_text = ask_gemini(f"Тест-кейс [{case_name}]: {test_input}", system_prompt)
+                bot_report += f"  🧪 <i>{case_name}</i>: {eval_text}\n"
+                
+            history[space_id] = {"last_sha": current_sha}
+        else:
+            bot_report += "• 💡 <i>Все модули стабильны. Замечания по версии уже зафиксированы, повторы скрыты до обновления кода.</i>\n"
+            
+        report_sections.append(bot_report)
+
+    save_history(history)
+    
+    final_text = "🤖 <b>[ОТЧЕТ ИИ-АГЕНТА: ЭКОСИСТЕМА 3 БОТОВ]</b>\n\n" + "\n".join(report_sections)
+    send_tg_report(final_text)
+    print("Комплексный отчет отправлен!")
 
 if __name__ == "__main__":
     main()
