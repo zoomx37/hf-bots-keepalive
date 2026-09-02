@@ -1,11 +1,20 @@
 {
   "opion2008/cupidon": {
-    "last_sha": "b863457"
+    "last_sha": "b863457",
+    "proposed_ideas": [
+      "**Название фичи:** TMA-стрим «AI Rizz-Arena»: Голосовой дуэль-симулятор подкатов"
+    ]
   },
   "opion2008/criminal-bot": {
-    "last_sha": "03922b9"
+    "last_sha": "03922b9",
+    "proposed_ideas": [
+      "**Название фичи:** TMA «AI-Приговор: Mugshot & Voice Verdict»\n\n**Суть и виральны"
+    ]
   },
   "opion2008/rslaw-bot": {
-    "last_sha": "ae38bba"
+    "last_sha": "ae38bba",
+    "proposed_ideas": [
+      "**Название фичи:** AI-Voice «Режим Звонка Адвокату»: Живой переговорщик на громк"
+    ]
   }
 }
