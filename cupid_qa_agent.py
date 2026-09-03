@@ -13,14 +13,14 @@ HISTORY_FILE = "qa_history.json"
 BOTS_CONFIG = {
     "opion2008/cupidon": {
         "title": "❤️ ИИ-Купидон (@AI_cupidon_bot)",
-        "domain_type": "Dating & Flirt AI, AI-Wingman, Relationships",
+        "domain_type": "Dating & Flirt AI, Voice Rizz, Video Notes Vibe, Red/Green Flags",
         "cases": [
+            ("Декодер: 'Привет, ты классный, но я сейчас очень занята по работе'", "AI-Декодер (Шанс на свидание)"),
+            ("Vibe-Soulmate: Видеокружочек уверенного парня с улыбкой", "Vibe-Soulmate (Кружочки)"),
+            ("Rizz-Arena: Аудиоподкат с бархатным голосом", "Rizz-Arena (Голос)"),
             ("Химия: Роман 15.10.1985 и Анна 20.04.1990", "ИИ-Химия (9 шкал)"),
-            ("Арбитраж: Муж забыл годовщину, жена молчит", "Высший Суд (Примирение)"),
-            ("Двойник: Создание комнаты room_5521", "ИИ-Двойник"),
-            ("Rizz-Рейтинг: Аудит фото и анкеты", "Rizz-Рейтинг"),
-            ("Флирт-Ринг: 5 раундов переписки", "Флирт-Тренажер"),
-            ("Ред-Флаги: Выявление манипуляций", "Детектор токсичности")
+            ("Химия [Негативный]: 31.02.1985 (невалидная дата)", "Валидация дат"),
+            ("Арбитраж: Муж задержался на работе, жена молчит", "Высший Суд (Примирение)")
         ]
     },
     "opion2008/criminal-bot": {
@@ -66,8 +66,6 @@ def send_tg_report(text):
         print(text)
         return
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    
-    # Автоматическое разделение длинных сообщений для Telegram (лимит 4096 символов)
     max_len = 3800
     parts = [text[i:i+max_len] for i in range(0, len(text), max_len)]
     for part in parts:
@@ -77,14 +75,15 @@ def send_tg_report(text):
         except Exception as e:
             print(f"Ошибка отправки в TG: {e}")
 
+# ВЫЗОВ СТРОГО 3.8 -> 3.7 -> 3.6
 def ask_gemini(prompt, system_instruction):
     if not GEMINI_API_KEY:
         return "⚠️ Отсутствует GEMINI_API_KEY"
         
     models_to_try = [
+        "gemini-3.8-flash",
         "gemini-3.7-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash"
+        "gemini-3.6-flash"
     ]
     
     payload = {
@@ -103,10 +102,9 @@ def ask_gemini(prompt, system_instruction):
         except Exception:
             continue
             
-    return "⚠️ Ошибка связи с Gemini API."
+    return "⚠️ Ошибка связи с Gemini API (проверьте квоты)."
 
 def get_live_bot_stats(space_id):
-    """Считывает живую статистику пользователей из БД бота через эндпоинт /stats"""
     subdomain = space_id.replace("/", "-")
     url = f"https://{subdomain}.hf.space/stats"
     try:
@@ -115,17 +113,15 @@ def get_live_bot_stats(space_id):
             data = res.json()
             users_count = data.get("total_users", 0)
             queries_today = data.get("queries_today", 0)
-            return f"👥 Пользователей: <b>{users_count}</b> | ⚡ Запросов сегодня: <b>{queries_today}</b>"
-    except Exception:
-        pass
+            return f"👥 Пользователей в БД: <b>{users_count}</b> | ⚡ Запросов сегодня: <b>{queries_today}</b>"
+    except Exception: pass
     return "📊 Статистика: <i>эндпоинт /stats подключается</i>"
 
 def generate_hype_feature(bot_name, domain, previous_ideas):
-    """Генерирует свежую хайповую/виральную фичу на базе трендов мирового AI без повторов"""
     prev_text = "\n".join([f"- {item}" for item in previous_ideas[-5:]]) if previous_ideas else "Пока нет"
     system_prompt = (
         "Ты — топовый Product Manager и AI-Трендсеттер. Придумай ровно ОДНУ инновационную, хайповую и виральную фичу "
-        "для Telegram/VK бота на базе передовых мировых трендов ИИ (AI Voice, Deep-Vision, Telegram Mini Apps, геймификация). "
+        "для Telegram/VK бота на базе передовых мировых трендов ИИ (Voice Rizz, Deep-Vision, Telegram Mini Apps, геймификация). "
         "Формат: Название фичи (1 строка) + Суть и виральный эффект (2-3 строки). "
         f"КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО повторять ранее предложенные идеи:\n{prev_text}"
     )
@@ -133,7 +129,7 @@ def generate_hype_feature(bot_name, domain, previous_ideas):
     return ask_gemini(prompt, system_prompt)
 
 def main():
-    print("Запуск комплексного QA-Агента и Трендового Радара...")
+    print("Запуск комплексного QA-Агента 3.8...")
     hf_api = HfApi(token=HF_TOKEN) if HF_TOKEN else None
     history = load_history()
     
@@ -144,7 +140,6 @@ def main():
         subdomain = space_id.replace("/", "-")
         ping_url = f"https://{subdomain}.hf.space/ping"
         
-        # 1. Проверка доступности и Keepalive
         server_status = "✅ Работает (200 OK)"
         current_sha = "unknown"
         
@@ -165,10 +160,8 @@ def main():
                 current_sha = getattr(space_info, "sha", "unknown")[:7]
             except: pass
 
-        # 2. Живая статистика пользователей
         stats_line = get_live_bot_stats(space_id)
 
-        # 3. Проверка обновлений кода и QA-аудит
         bot_hist = history.get(space_id, {"last_sha": "", "proposed_ideas": []})
         last_sha = bot_hist.get("last_sha", "")
         sha_changed = (current_sha != last_sha) or (not last_sha)
@@ -181,7 +174,7 @@ def main():
         )
         
         if sha_changed:
-            bot_report += "• 🔬 <b>Результаты QA-аудита модулей:</b>\n"
+            bot_report += "• 🔬 <b>Результаты QA-аудита модулей (Gemini 3.8):</b>\n"
             qa_system = "Ты — QA-инженер. Оцени тест-кейс функции бота в 1 краткую строку (Статус: ОК / Замечание)."
             for test_input, case_name in cfg["cases"]:
                 eval_text = ask_gemini(f"Тест [{case_name}]: {test_input}", qa_system)
@@ -190,22 +183,21 @@ def main():
         else:
             bot_report += "• 🔬 <b>QA-статус:</b> Все модули работают в штатном режиме (регрессий нет).\n"
 
-        # 4. Генерация свежей хайповой фичи (без повторений)
         prev_ideas = bot_hist.get("proposed_ideas", [])
         new_idea = generate_hype_feature(title, cfg["domain_type"], prev_ideas)
         bot_report += f"\n• 🔥 <b>Трендовый AI-апгрейд (Хайповая фича):</b>\n{new_idea}\n"
         
         prev_ideas.append(new_idea[:80])
-        bot_hist["proposed_ideas"] = prev_ideas[-15:] # сохраняем последние 15 идей для исключения дублей
+        bot_hist["proposed_ideas"] = prev_ideas[-15:]
         history[space_id] = bot_hist
         
         report_sections.append(bot_report)
 
     save_history(history)
     
-    final_text = "🤖 <b>[ОТЧЕТ ИИ-АГЕНТА: ЭКОСИСТЕМА 3 БОТОВ & ТРЕНДЫ]</b>\n\n" + "\n".join(report_sections)
+    final_text = "🤖 <b>[ОТЧЕТ ИИ-АГЕНТА: ЭКОСИСТЕМА 3 БОТОВ & GEMINI 3.8]</b>\n\n" + "\n".join(report_sections)
     send_tg_report(final_text)
-    print("Отчет с трендами и статистикой успешно отправлен!")
+    print("Отчет успешно отправлен!")
 
 if __name__ == "__main__":
     main()
