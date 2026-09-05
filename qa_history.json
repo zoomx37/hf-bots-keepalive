@@ -14,7 +14,8 @@
       "⚠️ Ошибка связи с Gemini API (проверьте квоты).",
       "**Название фичи:** TMA «AI Vibe-Check Кружочков: Voice Rizz & Micro-Expression B",
       "**Название фичи:** TMA «AI Acoustic Chemistry: Детектор Сексуального Напряжения ",
-      "**Название фичи:** TMA «AI Rizz-Дуэль: Кружочек-Баттл с ИИ-Альфой»\n\n**Суть и вир"
+      "**Название фичи:** TMA «AI Rizz-Дуэль: Кружочек-Баттл с ИИ-Альфой»\n\n**Суть и вир",
+      "**Название фичи:** TMA «AI Shadow-Date: Голосовой Симулятор Свидания с Клоном Кр"
     ]
   },
   "opion2008/criminal-bot": {
@@ -32,11 +33,12 @@
       "⚠️ Ошибка связи с Gemini API (проверьте квоты).",
       "⚠️ Ошибка связи с Gemini API (проверьте квоты).",
       "**«AI-Приговор & Mugshot: Суд над корешем» (TMA + Deep-Vision + Voice AI)**\n\n**С",
-      "**«AI-Криминалист: Бытовое Место Преступления» (Deep-Vision + True-Crime Roast)*"
+      "**«AI-Криминалист: Бытовое Место Преступления» (Deep-Vision + True-Crime Roast)*",
+      "**«AI-Полиграф: Допрос по Кружочкам» (Deep-Vision + Voice Forensic AI + TMA)**\n\n"
     ]
   },
   "opion2008/rslaw-bot": {
-    "last_sha": "9228864",
+    "last_sha": "68cde50",
     "proposed_ideas": [
       "**Название фичи:** AI-Voice «Режим Звонка Адвокату»: Живой переговорщик на громк",
       "⚠️ Ошибка связи с Gemini API.",
@@ -50,7 +52,8 @@
       "**Название фичи:** Telegram Mini App «Crash-Vision 360°: Интерактивный 3D-реконс",
       "**Название фичи:** TMA «ИИ-Судья: ДТП-Баттл & Verdict Reels»\n**Суть и виральный ",
       "**Название фичи:** TMA «Dashcam Karma: ИИ-Охотник за Авто-Хамством & Карма-Reels",
-      "**Название фичи:** Telegram Mini App «ИИ-Шептун: Live Cop-Whisperer & Детектор Р"
+      "**Название фичи:** Telegram Mini App «ИИ-Шептун: Live Cop-Whisperer & Детектор Р",
+      "**Название фичи:** TMA «Voice-Rizz Юрист: ИИ-Прозвон Страховых & Flex-Аудио»\n\n**"
     ]
   }
 }
