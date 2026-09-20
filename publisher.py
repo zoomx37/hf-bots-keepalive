@@ -4,7 +4,7 @@ import requests
 import vk_api
 
 TG_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", os.getenv("TG_BOT_TOKEN", ""))
-VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN", os.getenv("VK_TOKEN", ""))
+VK_TOKEN = os.getenv("VK_GROUP_TOKEN", os.getenv("VK_TOKEN", ""))
 
 def load_channels():
     if not os.path.exists("channels.yaml"):
@@ -26,19 +26,16 @@ def post_to_telegram(channel_target: str, text: str) -> tuple[bool, str]:
         r = requests.post(url, json=payload, timeout=15).json()
         if r.get("ok"):
             return True, "Успешно"
-        return False, r.get("description", "Ошибка Telegram API")
+        return False, r.get("description", "Ошибка Telegram")
     except Exception as e:
         return False, str(e)
 
 def post_to_vk(owner_id, text: str) -> tuple[bool, str]:
-    token = os.getenv("VK_GROUP_TOKEN", os.getenv("VK_TOKEN", ""))
-    if not token:
-        return False, "VK_GROUP_TOKEN не задан"
+    if not VK_TOKEN:
+        return False, "Токен ВК не задан"
     try:
-        # Напрямую отправляем числовой ID сообщества (-239533580)
-        target_id = -239533580 if str(owner_id) in ["-239533580", "239533580", "qp_on"] else -abs(int(owner_id))
-        
-        vk_session = vk_api.VkApi(token=token, api_version="5.131")
+        target_id = -239533580  # ID сообщества vk.com/qp_on
+        vk_session = vk_api.VkApi(token=VK_TOKEN, api_version="5.131")
         vk = vk_session.get_api()
         res = vk.wall.post(owner_id=target_id, from_group=1, message=text)
         return True, f"post_id: {res.get('post_id')}"
@@ -54,17 +51,11 @@ def publish_approved_post(target: str, text: str) -> str:
         if plat == "tg":
             tg_target = ch.get("target")
             ok, msg = post_to_telegram(tg_target, text)
-            if ok:
-                results.append(f"✅ TG: Опубликовано в {tg_target}")
-            else:
-                results.append(f"❌ TG ({tg_target}): {msg}")
+            results.append(f"{'✅' if ok else '❌'} TG ({tg_target}): {msg}")
                 
         elif plat == "vk":
             vk_owner = ch.get("owner_id")
             ok, msg = post_to_vk(vk_owner, text)
-            if ok:
-                results.append(f"✅ VK: Опубликовано на стене qp_on ({msg})")
-            else:
-                results.append(f"❌ VK (qp_on): {msg}")
+            results.append(f"{'✅' if ok else '❌'} VK (qp_on): {msg}")
                 
-    return "\n".join(results) if results else "⚠️ Нет настроенных каналов в channels.yaml"
+    return "\n".join(results) if results else "⚠️ Нет каналов в channels.yaml"
