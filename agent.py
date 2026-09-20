@@ -14,6 +14,13 @@ from drafts import add_draft, get_pending_drafts
 from pager import process_pager_updates
 from tg_userbot import run_cupidon_live_test
 
+# Безопасное подключение модератора (скрипт не упадет, если файл еще не создан)
+try:
+    from moderator import run_moderation_check
+except Exception:
+    def run_moderation_check():
+        return ["• ВК qp_on: Модератор в процессе калибровки"]
+
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
 
@@ -24,7 +31,6 @@ SPACES = [
 ]
 
 def send_telegram_report(message: str):
-    """Гарантированная отправка отчёта с автоматическим fallback на обычный текст."""
     if not TG_BOT_TOKEN:
         print("[REPORT LOG]\n" + message)
         return
@@ -43,7 +49,7 @@ def send_telegram_report(message: str):
     except Exception:
         pass
     
-    # Резервная отправка без HTML-тегов, если Telegram отклонил разметку
+    # Fallback на чистый текст
     try:
         clean_text = (
             message.replace("<b>", "")
@@ -55,16 +61,12 @@ def send_telegram_report(message: str):
         )
         payload["text"] = clean_text
         payload.pop("parse_mode", None)
-        r2 = requests.post(url, json=payload, timeout=15)
-        if r2.status_code == 200:
-            print("✅ Отчёт доставлен в Telegram (Plain Text).")
-        else:
-            print(f"❌ Telegram API вернул ошибку: {r2.text}")
+        requests.post(url, json=payload, timeout=15)
+        print("✅ Отчёт доставлен в Telegram (Plain Text).")
     except Exception as e:
-        print(f"❌ Сбой отправки отчёта: {e}")
+        print(f"❌ Ошибка отправки отчёта: {e}")
 
 def run_keepalive_check() -> list[str]:
-    """1. Проверка доступности Hugging Face пространств и автопробуждение."""
     hf_token = os.getenv("HF_TOKEN")
     hf_api = HfApi(token=hf_token) if hf_token else None
     results = []
@@ -90,7 +92,6 @@ def run_keepalive_check() -> list[str]:
     return results
 
 async def test_telegram_userbot() -> tuple[str, str]:
-    """2. Подключение Telethon Userbot и живое тестирование бота Купидон."""
     api_id = os.getenv("TG_API_ID")
     api_hash = os.getenv("TG_API_HASH")
     session_str = os.getenv("TG_STRING_SESSION")
@@ -108,7 +109,7 @@ async def test_telegram_userbot() -> tuple[str, str]:
         me = await client.get_me()
         user_info = f"@{me.username}" if me.username else me.first_name
         
-        # Живой тест диалога: отправка /start боту @AI_cupidon_bot и чтение ответа
+        # Живой тест диалога с ботом Купидон
         live_test_res = await run_cupidon_live_test(client)
         
         await client.disconnect()
@@ -117,13 +118,12 @@ async def test_telegram_userbot() -> tuple[str, str]:
         return f"❌ Сбой TG Userbot: {e}", "Ошибка"
 
 def test_vk_userbot() -> str:
-    """3. Проверка авторизации аккаунта агента ВКонтакте с защитой от флуда."""
     vk_token = os.getenv("VK_TOKEN")
     if not vk_token:
         return "⚠️ Не задан VK_TOKEN"
 
     try:
-        time.sleep(1.5)
+        time.sleep(1)
         vk_session = vk_api.VkApi(token=vk_token, api_version="5.131")
         vk = vk_session.get_api()
         user = vk.users.get()[0]
@@ -135,7 +135,6 @@ def test_vk_userbot() -> str:
         return f"❌ Сбой VK Userbot: {err_msg}"
 
 def test_ai_qa_reasoning() -> str:
-    """4. Тестирование аналитических способностей ИИ-модели."""
     prompt = "Оцени кратко (в 2 предложения): алгоритм поиска пары в боте 'Купидон' по общим интересам."
     answer, provider_info = ask_llm(prompt)
     clean_ans = html.escape(answer[:220])
@@ -145,7 +144,7 @@ async def main():
     print("🚀 [ИИ-Агент] Инициализация базы данных и запуск цикла...")
     init_db()
     
-    # 1. Если очередь черновиков пуста — создаем пост строго для канала @qpd_n
+    # 1. Если очередь черновиков пуста — создаем пост для канала @qpd_n
     if not get_pending_drafts():
         add_draft(
             draft_type="post",
@@ -168,7 +167,10 @@ async def main():
     # 6. Тестирование ИИ-мозга
     ai_status = test_ai_qa_reasoning()
 
-    # 7. Формирование и отправка итоговой сводки
+    # 7. Модерация спама
+    mod_results = run_moderation_check()
+
+    # 8. Формирование и отправка итоговой сводки
     report = (
         "🤖 <b>[ОТЧЕТ АВТОНОМНОГО ИИ-АГЕНТА КУПИДОН]</b>\n\n"
         "📡 <b>1. Антисон & Серверы:</b>\n" + "\n".join(servers_status) + "\n\n"
@@ -176,6 +178,7 @@ async def main():
         f"💬 <b>Живой тест @AI_cupidon_bot:</b> {live_cupid_test}\n\n"
         f"🌐 <b>3. ВКонтакте Userbot:</b> {vk_status}\n\n"
         f"🧠 <b>4. ИИ-Мозг (QA-Тест):</b>\n{ai_status}\n\n"
+        f"🛡 <b>5. Модерация спама:</b>\n" + "\n".join(mod_results) + "\n\n"
         "💡 <i>Команды пульта: /queue (очередь), /approve &lt;ID&gt; &lt;вариант&gt;, /say &lt;кому&gt; &lt;текст&gt;, /status</i>"
     )
 
