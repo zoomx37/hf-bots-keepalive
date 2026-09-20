@@ -9,9 +9,13 @@ VK_TOKEN = os.getenv("VK_GROUP_TOKEN", os.getenv("VK_TOKEN", ""))
 def load_channels():
     if not os.path.exists("channels.yaml"):
         return []
-    with open("channels.yaml", "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-        return data.get("channels", [])
+    try:
+        with open("channels.yaml", "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            return data.get("channels", [])
+    except Exception as e:
+        print(f"Ошибка чтения channels.yaml: {e}")
+        return []
 
 def post_to_telegram(channel_target: str, text: str) -> tuple[bool, str]:
     if not TG_BOT_TOKEN:
@@ -34,7 +38,7 @@ def post_to_vk(owner_id, text: str) -> tuple[bool, str]:
     if not VK_TOKEN:
         return False, "Токен ВК не задан"
     try:
-        target_id = -239533580  # ID сообщества vk.com/qp_on
+        target_id = -239533580  # Прямой ID сообщества vk.com/qp_on
         vk_session = vk_api.VkApi(token=VK_TOKEN, api_version="5.131")
         vk = vk_session.get_api()
         res = vk.wall.post(owner_id=target_id, from_group=1, message=text)
