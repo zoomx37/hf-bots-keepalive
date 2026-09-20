@@ -1,12 +1,9 @@
-name: Run Autonomous QA & Keepalive Agent
+name: Autonomous AI Agent (QA, Keepalive & Userbots)
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # Запуск каждые 6 часов
-  workflow_dispatch: # Ручной запуск в любой момент
-
-permissions:
-  contents: write
+    - cron: '0 */6 * * *' # Автоматический запуск каждые 6 часов
+  workflow_dispatch: # Кнопка для ручного запуска в любой момент
 
 jobs:
   run-agent:
@@ -21,20 +18,18 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install requests huggingface_hub
+        run: pip install -r requirements.txt
 
-      - name: Run Agent Script
+      - name: Run Autonomous Agent
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_STRING_SESSION: ${{ secrets.TG_STRING_SESSION }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
-        run: python cupid_qa_agent.py
-
-      - name: Save QA History
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add qa_history.json || true
-          git commit -m "Update QA history [skip ci]" || true
-          git push || true
+          VK_TOKEN: ${{ secrets.VK_TOKEN }}
+        run: python agent.py
