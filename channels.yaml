@@ -1,0 +1,10 @@
+channels:
+  - platform: tg
+    target: "@YK264"                # Замените на юзернейм вашего канала (с @)
+    auto_post: false                # Публикация строго через ваше /approve
+    topic: "автоправо и советы"
+
+  - platform: vk
+    owner_id: -239533580            # ID вашей группы ВК (обязательно с минусом!)
+    auto_post: false
+    topic: "советы и новости дейтинга"
