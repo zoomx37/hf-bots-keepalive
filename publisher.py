@@ -31,26 +31,15 @@ def post_to_telegram(channel_target: str, text: str) -> tuple[bool, str]:
         return False, str(e)
 
 def post_to_vk(owner_id, text: str) -> tuple[bool, str]:
-    if not VK_GROUP_TOKEN:
-        return False, "VK_GROUP_TOKEN не задан в Secrets"
+    token = os.getenv("VK_GROUP_TOKEN", os.getenv("VK_TOKEN", ""))
+    if not token:
+        return False, "VK_GROUP_TOKEN не задан"
     try:
-        vk_session = vk_api.VkApi(token=VK_GROUP_TOKEN, api_version="5.131")
-        vk = vk_session.get_api()
+        # Напрямую отправляем числовой ID сообщества (-239533580)
+        target_id = -239533580 if str(owner_id) in ["-239533580", "239533580", "qp_on"] else -abs(int(owner_id))
         
-        # Если передан короткий адрес "qp_on" — определяем числовой ID
-        if isinstance(owner_id, str):
-            clean_name = owner_id.lstrip('-@').replace("https://vk.ru/", "").replace("https://vk.com/", "")
-            if clean_name.isdigit():
-                target_id = -int(clean_name)
-            else:
-                res = vk.utils.resolveScreenName(screen_name=clean_name)
-                if res and res.get('type') == 'group':
-                    target_id = -int(res['object_id'])
-                else:
-                    target_id = -239533580  # Дефолтный ID qp_on
-        else:
-            target_id = -abs(int(owner_id))
-
+        vk_session = vk_api.VkApi(token=token, api_version="5.131")
+        vk = vk_session.get_api()
         res = vk.wall.post(owner_id=target_id, from_group=1, message=text)
         return True, f"post_id: {res.get('post_id')}"
     except Exception as e:
