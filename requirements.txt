@@ -3,3 +3,4 @@ huggingface_hub
 openai
 telethon
 vk_api
+pyyaml
