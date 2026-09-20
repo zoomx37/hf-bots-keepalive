@@ -1,12 +1,9 @@
-name: Autonomous AI Agent (QA, Keepalive & Userbots)
+name: Autonomous AI Agent
 
 on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   run-agent:
@@ -20,8 +17,9 @@ jobs:
         with:
           python-version: '3.11'
 
-- name: Install Dependencies
-      run: pip install requests huggingface_hub openai telethon vk_api pyyaml
+      - name: Install Dependencies
+        run: pip install requests huggingface_hub openai telethon vk_api pyyaml
+
       - name: Run Autonomous Agent
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -36,11 +34,3 @@ jobs:
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           VK_GROUP_TOKEN: ${{ secrets.VK_GROUP_TOKEN }}
         run: python agent.py
-
-      - name: Save DB State
-        run: |
-          git config --global user.name "CupidAgent[bot]"
-          git config --global user.email "agent@github.com"
-          git add agent.db || true
-          git commit -m "Auto-update agent.db state" || true
-          git push || true
