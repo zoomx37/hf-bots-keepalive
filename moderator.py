@@ -8,10 +8,10 @@ import vkrate
 
 log = logging.getLogger("moderator")
 
-# Читать комментарии разрешено ТОЛЬКО юзер-токеном, удалять спам — токеном группы
+VK_ENABLED = os.getenv("VK_ENABLED", "false").lower() == "true"
 VK_USER_TOKEN = os.getenv("VK_TOKEN", "").strip()
 VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN", "").strip()
-VK_GROUP_ID = 239533580  # ID сообщества vk.com/qp_on
+VK_GROUP_ID = 239533580  # ID сообщества qp_on
 MOD_DRY_RUN = os.getenv("MOD_DRY_RUN", "false").lower() == "true"
 
 RULES = """Ты — строгий ИИ-модератор сообщества 'Купидон'. Оцени текст комментария.
@@ -37,22 +37,20 @@ def classify_text(text: str) -> dict:
     return {"verdict": "ok", "reason": "check_failed"}
 
 def run_moderation_check() -> list[str]:
-    """Проверяет комментарии на стене ВК через юзер-токен и удаляет спам через токен группы."""
-    results = []
-    
+    if not VK_ENABLED:
+        return ["• <b>ВК qp_on:</b> ⏸️ На карантине (VK_ENABLED=false)"]
+        
     if not VK_USER_TOKEN:
-        return ["• <b>ВК qp_on:</b> Требуется юзер-токен для чтения стены"]
+        return ["• <b>ВК qp_on:</b> Требуется VK_TOKEN пользователя для чтения стены"]
 
     try:
         sess_user = vkrate.get_vk_session(VK_USER_TOKEN)
-        # Получаем комментарии через метод wall.getComments (только с токеном пользователя!)
         comments = vkrate.vk_call(sess_user, "wall.getComments", owner_id=-VK_GROUP_ID, count=10, sort="desc")
         items = comments.get("items", [])
         
         checked = 0
         deleted = 0
         
-        # Токен группы для удаления комментариев
         del_token = VK_GROUP_TOKEN or VK_USER_TOKEN
         sess_del = vkrate.get_vk_session(del_token)
         
@@ -61,7 +59,6 @@ def run_moderation_check() -> list[str]:
             cid = c.get("id")
             from_id = c.get("from_id")
             
-            # Пропускаем комментарии самого сообщества
             if not text or from_id < 0:
                 continue
                 
@@ -84,10 +81,8 @@ def run_moderation_check() -> list[str]:
         results.append(f"• <b>ВК qp_on:</b> Проверено {checked} коммент., удалено спама: {deleted}")
     except Exception as e:
         err = str(e)
-        if "[9]" in err:
+        if "[9]" in err or "Flood control" in err:
             results.append("• <b>ВК qp_on:</b> Ожидание окна лимитов ([9] Flood control)")
-        elif "[27]" in err:
-            results.append("• <b>ВК qp_on:</b> Ошибка метода [27] (нужен User-токен)")
         else:
             results.append(f"• <b>ВК qp_on:</b> {err[:60]}")
 
