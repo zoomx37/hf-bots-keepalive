@@ -30,29 +30,35 @@ def run_doctor(args=""):
     else:
         rows.append("❌ <b>TG Userbot:</b> Не все ключи TG_API заданы")
 
-    # 3. Проверка VK Userbot
-    vk_token = os.getenv("VK_TOKEN")
-    if vk_token:
-        try:
-            sess = vkrate.get_vk_session(vk_token)
-            me = vkrate.vk_call(sess, "users.get")[0]
-            rows.append(f"✅ <b>VK Userbot:</b> Аккаунт {me['first_name']} {me['last_name']} (id{me['id']}) активен")
-        except Exception as e:
-            rows.append(f"⚠️ <b>VK Userbot:</b> {str(e)[:80]}")
+    # 3. Проверка VK Userbot с учётом карантина
+    if os.getenv("VK_ENABLED", "true").lower() == "false":
+        rows.append("⏸️ <b>VK Userbot:</b> На карантине (VK_ENABLED=false)")
     else:
-        rows.append("❌ <b>VK Userbot:</b> VK_TOKEN не найден в Secrets")
+        vk_token = os.getenv("VK_TOKEN")
+        if vk_token:
+            try:
+                sess = vkrate.get_vk_session(vk_token)
+                me = vkrate.vk_call(sess, "users.get")[0]
+                rows.append(f"✅ <b>VK Userbot:</b> Аккаунт {me['first_name']} {me['last_name']} (id{me['id']}) активен")
+            except Exception as e:
+                rows.append(f"⚠️ <b>VK Userbot:</b> {str(e)[:80]}")
+        else:
+            rows.append("❌ <b>VK Userbot:</b> VK_TOKEN не найден")
 
     # 4. Проверка VK Group Token
-    vk_group_token = os.getenv("VK_GROUP_TOKEN")
-    if vk_group_token:
-        try:
-            sess_grp = vkrate.get_vk_session(vk_group_token)
-            grp = vkrate.vk_call(sess_grp, "groups.getById", group_id="239533580")[0]
-            rows.append(f"✅ <b>VK Сообщество:</b> «{grp.get('name')}» доступно для постов")
-        except Exception as e:
-            rows.append(f"⚠️ <b>VK Сообщество:</b> Ошибка ({str(e)[:80]})")
+    if os.getenv("VK_ENABLED", "true").lower() == "false":
+        rows.append("⏸️ <b>VK Сообщество:</b> На карантине (VK_ENABLED=false)")
     else:
-        rows.append("⚠️ <b>VK Сообщество:</b> VK_GROUP_TOKEN не задан")
+        vk_group_token = os.getenv("VK_GROUP_TOKEN")
+        if vk_group_token:
+            try:
+                sess_grp = vkrate.get_vk_session(vk_group_token)
+                grp = vkrate.vk_call(sess_grp, "groups.getById", group_id="239533580")[0]
+                rows.append(f"✅ <b>VK Сообщество:</b> «{grp.get('name')}» доступно")
+            except Exception as e:
+                rows.append(f"⚠️ <b>VK Сообщество:</b> Ошибка ({str(e)[:80]})")
+        else:
+            rows.append("⚠️ <b>VK Сообщество:</b> VK_GROUP_TOKEN не задан")
 
     # 5. Проверка серверов Hugging Face
     active_spaces = 0
@@ -70,4 +76,4 @@ def run_doctor(args=""):
     drafts_count = len(get_pending_drafts())
     rows.append(f"📋 <b>Очередь черновиков:</b> {drafts_count} ожидают решения")
 
-    notify("\n".join(rows))
+    notify("\n".join(rows), html=True)
