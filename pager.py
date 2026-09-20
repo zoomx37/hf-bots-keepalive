@@ -1,11 +1,18 @@
 import os
-import requests
+import io
 import logging
+import requests
 from drafts import get_pending_drafts, approve_draft, reject_draft
 from publisher import publish_approved_post
 
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
+
+# Буфер для логов ошибок
+ERR_BUF = io.StringIO()
+_err_handler = logging.StreamHandler(ERR_BUF)
+_err_handler.setLevel(logging.WARNING)
+logging.getLogger().addHandler(_err_handler)
 
 def send_msg(text: str, reply_markup=None):
     if not TG_BOT_TOKEN:
@@ -28,10 +35,24 @@ def send_msg(text: str, reply_markup=None):
 def handle_status(args=""):
     send_msg("🟢 <b>Агент активен:</b> Все контуры функционируют штатно.")
 
+def handle_errors(args=""):
+    ERR_BUF.seek(0)
+    lines = ERR_BUF.readlines()
+    out = "".join(lines[-12:]) or "Ошибок в журнале нет ✅"
+    send_msg(f"📋 <b>Последние записи журнала:</b>\n<pre>{out[-3000:]}</pre>")
+
+def handle_doctor(args=""):
+    send_msg("🩺 <i>Запускаю самодиагностику систем...</i>")
+    try:
+        from doctor import run_doctor
+        run_doctor()
+    except Exception as e:
+        send_msg(f"❌ Ошибка доктора: {e}")
+
 def handle_queue(args=""):
     drafts = get_pending_drafts()
     if not drafts:
-        send_msg("📭 <b>Очередь пуста:</b> Нет действий, требующих вашего решения.")
+        send_msg("📭 <b>Очередь пуста:</b> Нет действий, требующих решения.")
         return
     
     for d in drafts:
@@ -40,7 +61,6 @@ def handle_queue(args=""):
         for idx, var in enumerate(variants, 1):
             msg += f"<b>Вариант {idx}:</b>\n<i>«{var.strip()}»</i>\n\n"
 
-        # Создаем удобные интерактивные кнопки
         inline_keyboard = [
             [
                 {"text": "🔥 Одобрить Вариант 1", "callback_data": f"app_{d['id']}_1"},
@@ -55,7 +75,7 @@ def handle_queue(args=""):
 def handle_approve(draft_id: int, variant: int):
     success, text = approve_draft(draft_id, variant)
     if success:
-        send_msg(f"🚀 <b>Черновик #{draft_id} (Вариант {variant}) утверждён!</b> Отправляю на публикацию...")
+        send_msg(f"🚀 <b>Черновик #{draft_id} (Вариант {variant}) утверждён!</b> Публикую...")
         publish_res = publish_approved_post(target="", text=text)
         send_msg(f"📢 <b>Результат публикации:</b>\n{publish_res}")
     else:
@@ -79,10 +99,11 @@ COMMANDS = {
     "/status": handle_status,
     "/queue": handle_queue,
     "/say": handle_say,
+    "/doctor": handle_doctor,
+    "/errors": handle_errors,
 }
 
 def process_pager_updates():
-    """Обработка текстовых команд и нажатий на кнопки."""
     if not TG_BOT_TOKEN:
         return
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates"
@@ -92,7 +113,6 @@ def process_pager_updates():
             update_id = u["update_id"]
             requests.get(url, params={"offset": update_id + 1, "timeout": 0}, timeout=4)
             
-            # 1. Если нажали кнопку под черновиком
             if "callback_query" in u:
                 cb = u["callback_query"]
                 sender_id = str(cb.get("from", {}).get("id", ""))
@@ -110,7 +130,6 @@ def process_pager_updates():
                     handle_reject(int(d_id))
                 continue
 
-            # 2. Если отправили команду текстом
             m = u.get("message", {})
             sender_id = str(m.get("chat", {}).get("id", ""))
             if sender_id != str(ADMIN_CHAT_ID):
