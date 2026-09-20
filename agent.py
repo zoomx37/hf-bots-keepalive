@@ -1,5 +1,6 @@
 import os
 import asyncio
+import html
 import requests
 from huggingface_hub import HfApi
 from telethon import TelegramClient
@@ -7,6 +8,9 @@ from telethon.sessions import StringSession
 import vk_api
 
 from llm import ask_llm
+from db import init_db
+from drafts import add_draft
+from pager import process_pager_updates
 
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
@@ -18,11 +22,13 @@ SPACES = [
 ]
 
 def send_telegram_report(message: str):
-    """Отправляет итоговый отчет владельцу через пейджер-бота."""
+    """Гарантированная доставка отчета: сначала HTML, при сбое — чистый текст."""
     if not TG_BOT_TOKEN:
         print(message)
         return
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    
+    # Попытка 1: Отправка с HTML
     payload = {
         "chat_id": ADMIN_CHAT_ID,
         "text": message,
@@ -30,12 +36,27 @@ def send_telegram_report(message: str):
         "disable_web_page_preview": True
     }
     try:
-        requests.post(url, json=payload, timeout=15)
+        r = requests.post(url, json=payload, timeout=15)
+        if r.status_code == 200:
+            print("✅ Отчёт успешно доставлен в Telegram (HTML).")
+            return
+    except Exception:
+        pass
+    
+    # Попытка 2: Fallback на чистый текст без тегов
+    try:
+        clean_text = message.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+        payload["text"] = clean_text
+        payload.pop("parse_mode", None)
+        r2 = requests.post(url, json=payload, timeout=15)
+        if r2.status_code == 200:
+            print("✅ Отчёт доставлен в Telegram (Plain Text).")
+        else:
+            print(f"❌ Telegram API вернул ошибку: {r2.text}")
     except Exception as e:
-        print(f"❌ Ошибка отправки отчета в TG: {e}")
+        print(f"❌ Критическая ошибка отправки: {e}")
 
 def run_keepalive_check() -> list[str]:
-    """1. Проверка доступности Hugging Face серверов и авто-будильник."""
     hf_token = os.getenv("HF_TOKEN")
     hf_api = HfApi(token=hf_token) if hf_token else None
     results = []
@@ -48,20 +69,17 @@ def run_keepalive_check() -> list[str]:
             if res.status_code == 200:
                 results.append(f"• <b>{space}</b>: ✅ Работает (200 OK)")
             else:
-                if hf_api:
-                    hf_api.restart_space(repo_id=space)
-                results.append(f"• <b>{space}</b>: ⚠️ Код {res.status_code} ➔ Перезапущен через API")
+                if hf_api: hf_api.restart_space(repo_id=space)
+                results.append(f"• <b>{space}</b>: ⚠️ Код {res.status_code} ➔ Перезапущен")
         except Exception:
             try:
-                if hf_api:
-                    hf_api.restart_space(repo_id=space)
-                results.append(f"• <b>{space}</b>: 🚨 Спал/Недоступен ➔ Принудительно разбужен")
+                if hf_api: hf_api.restart_space(repo_id=space)
+                results.append(f"• <b>{space}</b>: 🚨 Спал ➔ Принудительно разбужен")
             except Exception as err:
-                results.append(f"• <b>{space}</b>: ❌ Ошибка перезапуска ({err})")
+                results.append(f"• <b>{space}</b>: ❌ Ошибка ({err})")
     return results
 
 async def test_telegram_userbot() -> str:
-    """2. Тестирование Userbot-аккаунта агента в Telegram."""
     api_id = os.getenv("TG_API_ID")
     api_hash = os.getenv("TG_API_HASH")
     session_str = os.getenv("TG_STRING_SESSION")
@@ -74,17 +92,16 @@ async def test_telegram_userbot() -> str:
         await client.connect()
         if not await client.is_user_authorized():
             await client.disconnect()
-            return "❌ Ошибка авторизации Userbot (сессия недействительна)"
+            return "❌ Ошибка авторизации Userbot"
         
         me = await client.get_me()
         user_info = f"@{me.username}" if me.username else me.first_name
         await client.disconnect()
         return f"✅ Подключен: {user_info} (ID: {me.id})"
     except Exception as e:
-        return f"❌ Сбой Telegram Userbot: {e}"
+        return f"❌ Сбой TG Userbot: {e}"
 
 def test_vk_userbot() -> str:
-    """3. Тестирование Userbot-аккаунта агента во ВКонтакте."""
     vk_token = os.getenv("VK_TOKEN")
     if not vk_token:
         return "⚠️ Пропущен: не задан VK_TOKEN"
@@ -98,40 +115,41 @@ def test_vk_userbot() -> str:
         return f"❌ Сбой VK Userbot: {e}"
 
 def test_ai_qa_reasoning() -> str:
-    """4. Тестирование логики ИИ-моделей агента."""
-    prompt = (
-        "Сделай краткий экспертный QA-аудит (2-3 строки): "
-        "Проверь логику расчета совместимости пары по Human Design и соционике для дейтинг-бота 'Купидон'."
-    )
+    prompt = "Проверь работоспособность аналитического модуля Купидона (1-2 предложения)."
     answer, provider_info = ask_llm(prompt)
-    return f"<b>Модель:</b> <i>{provider_info}</i>\n{answer[:350]}..."
+    clean_ans = html.escape(answer[:250])
+    return f"<b>Модель:</b> <i>{provider_info}</i>\n{clean_ans}"
 
 async def main():
-    print("🚀 [ИИ-Агент] Запуск комплексного цикла тестирования и мониторинга...")
+    print("🚀 [ИИ-Агент] Инициализация баз и запуск...")
+    init_db()
     
-    # 1. Проверка серверов
+    # Читаем команды из пульта
+    process_pager_updates()
+    
+    # Генерируем тестовый черновик для проверки пульта
+    add_draft(
+        draft_type="post",
+        target="@cupidon_channel",
+        payload="🔥 3 главных правила успешного первого свидания: 1. Будьте собой. 2. Слушайте партнера.|||💡 Секрет идеального диалога: задавайте открытые вопросы!"
+    )
+    
     servers_status = run_keepalive_check()
-    
-    # 2. Проверка Userbot TG
     tg_status = await test_telegram_userbot()
-    
-    # 3. Проверка Userbot VK
     vk_status = test_vk_userbot()
-    
-    # 4. Проверка ИИ-моделей
     ai_status = test_ai_qa_reasoning()
 
-    # Сборка финального отчета
     report = (
         "🤖 <b>[ОТЧЕТ АВТОНОМНОГО ИИ-АГЕНТА КУПИДОН]</b>\n\n"
         "📡 <b>1. Антисон & Серверы:</b>\n" + "\n".join(servers_status) + "\n\n"
         f"📱 <b>2. Telegram Userbot:</b> {tg_status}\n"
         f"🌐 <b>3. ВКонтакте Userbot:</b> {vk_status}\n\n"
-        f"🧠 <b>4. ИИ-Мозг (QA-Тест):</b>\n{ai_status}"
+        f"🧠 <b>4. ИИ-Мозг (QA-Тест):</b>\n{ai_status}\n\n"
+        "💡 <i>Отправьте в этот чат команду <b>/queue</b> для проверки очереди черновиков!</i>"
     )
 
     send_telegram_report(report)
-    print("✅ [ИИ-Агент] Цикл успешно завершен, отчет отправлен в Telegram!")
+    print("✅ [ИИ-Агент] Цикл завершён!")
 
 if __name__ == "__main__":
     asyncio.run(main())
