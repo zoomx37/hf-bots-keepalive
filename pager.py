@@ -1,8 +1,8 @@
 import os
 import requests
 import logging
-import asyncio
 from drafts import get_pending_drafts, approve_draft, reject_draft
+from publisher import publish_approved_post
 
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
@@ -19,7 +19,7 @@ def send_msg(text: str):
         print(f"Ошибка отправки pager: {e}")
 
 def handle_status(args=""):
-    send_msg("🟢 <b>Агент активен:</b> Все контуры (Антисон, Userbot TG, LLM-мозг) функционируют штатно.")
+    send_msg("🟢 <b>Агент активен:</b> Все контуры функционируют штатно.")
 
 def handle_queue(args=""):
     drafts = get_pending_drafts()
@@ -46,11 +46,14 @@ def handle_approve(args=""):
         variant = int(parts[2]) if len(parts) > 2 else 1
         success, text = approve_draft(draft_id, variant)
         if success:
-            send_msg(f"✅ <b>Черновик #{draft_id} утверждён!</b>\nВыбранный текст:\n«{text[:300]}...»")
+            send_msg(f"🚀 <b>Черновик #{draft_id} утверждён! Отправляю на публикацию...</b>")
+            # Публикуем пост в каналы из channels.yaml
+            publish_res = publish_approved_post(target="", text=text)
+            send_msg(f"📢 <b>Результат публикации:</b>\n{publish_res}")
         else:
             send_msg(f"❌ <b>Ошибка:</b> {text}")
-    except ValueError:
-        send_msg("⚠️ ID и номер варианта должны быть числами.")
+    except Exception as e:
+        send_msg(f"⚠️ Ошибка обработки: {e}")
 
 def handle_reject(args=""):
     parts = args.split()
@@ -69,7 +72,7 @@ def handle_reject(args=""):
 def handle_say(args=""):
     parts = args.split(maxsplit=2)
     if len(parts) < 3:
-        send_msg("⚠️ Использование: <code>/say &lt;юзернейм/ID&gt; &lt;текст_сообщения&gt;</code>\nПример: <code>/say @durov Привет!</code>")
+        send_msg("⚠️ Использование: <code>/say &lt;юзернейм/ID&gt; &lt;текст_сообщения&gt;</code>")
         return
     target, text_to_send = parts[1], parts[2]
     send_msg(f"📨 Сообщение поставлено в очередь отправки для <b>{target}</b>:\n«{text_to_send}»")
