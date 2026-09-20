@@ -75,6 +75,11 @@ def ask_llm(prompt: str, system_prompt: str = "Ты — ИИ-QA инженер �
         print(f"⚠️ [Fallback] Groq сбой ({e}), переключаюсь на OpenRouter...")
 
     # 3. Пробуем OpenRouter
+
+    def ask(prompt: str, system: str = "Ты — модератор сообщества.", max_tokens: int = 500) -> str:
+    """Адаптер для вызова ИИ из moderator.py"""
+    content, _ = ask_llm(prompt, system_prompt=system)
+    return content
     try:
         return ask_openrouter(prompt, system_prompt)
     except Exception as e:
