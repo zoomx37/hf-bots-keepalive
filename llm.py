@@ -2,7 +2,7 @@ import os
 import requests
 from openai import OpenAI
 
-def ask_gemini_direct(prompt: str, system_prompt: str) -> str:
+def ask_gemini_direct(prompt: str, system_prompt: str) -> tuple[str, str]:
     """Прямой вызов Google Gemini REST API (1-й приоритет)."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -26,7 +26,7 @@ def ask_gemini_direct(prompt: str, system_prompt: str) -> str:
             continue
     raise RuntimeError("Gemini API не ответил")
 
-def ask_groq(prompt: str, system_prompt: str) -> str:
+def ask_groq(prompt: str, system_prompt: str) -> tuple[str, str]:
     """Вызов Groq Cloud (2-й приоритет)."""
     api_key = os.getenv("GROQ_API_KEY", "").strip()
     if not api_key:
@@ -43,7 +43,7 @@ def ask_groq(prompt: str, system_prompt: str) -> str:
     )
     return r.choices[0].message.content.strip(), "Groq (llama-3.3-70b)"
 
-def ask_openrouter(prompt: str, system_prompt: str) -> str:
+def ask_openrouter(prompt: str, system_prompt: str) -> tuple[str, str]:
     """Вызов OpenRouter (3-й приоритет)."""
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
@@ -75,14 +75,14 @@ def ask_llm(prompt: str, system_prompt: str = "Ты — ИИ-QA инженер �
         print(f"⚠️ [Fallback] Groq сбой ({e}), переключаюсь на OpenRouter...")
 
     # 3. Пробуем OpenRouter
-
-    def ask(prompt: str, system: str = "Ты — модератор сообщества.", max_tokens: int = 500) -> str:
-    """Адаптер для вызова ИИ из moderator.py"""
-    content, _ = ask_llm(prompt, system_prompt=system)
-    return content
     try:
         return ask_openrouter(prompt, system_prompt)
     except Exception as e:
         print(f"⚠️ [Fallback] OpenRouter сбой ({e}).")
 
     return "❌ Все провайдеры ИИ временно недоступны.", "None"
+
+def ask(prompt: str, system: str = "Ты — модератор сообщества.", max_tokens: int = 500) -> str:
+    """Адаптер для вызова ИИ из moderator.py"""
+    content, _ = ask_llm(prompt, system_prompt=system)
+    return content
