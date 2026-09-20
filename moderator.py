@@ -7,18 +7,14 @@ from huggingface_hub import HfApi
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 import vk_api
+import vk_api.exceptions
 
 from llm import ask_llm
 from db import init_db
 from drafts import add_draft, get_pending_drafts
 from pager import process_pager_updates
 from tg_userbot import run_cupidon_live_test
-
-try:
-    from moderator import run_moderation_check
-except Exception:
-    def run_moderation_check():
-        return ["• ВК qp_on: Модератор в процессе калибровки"]
+from moderator import run_moderation_check
 
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
@@ -118,17 +114,17 @@ def test_vk_userbot() -> str:
     if not vk_token:
         return "⚠️ Не задан VK_TOKEN"
 
-    # Защита от флуд-контроля: пробуем до 3 раз с нарастающей паузой
     for attempt in range(3):
         try:
             time.sleep(2 * (attempt + 1))
-            vk_session = vk_api.VkApi(token=vk_token, api_version="5.131")
-            vk = vk_session.get_api()
+            session = vk_api.VkApi(token=vk_token, api_version="5.131")
+            session.http.headers['User-Agent'] = 'KateMobileAndroid/113.1 lite-arm64-v8a (Android 14; SDK 34; Google Pixel 7; ru)'
+            vk = session.get_api()
             user = vk.users.get()[0]
             return f"✅ Подключен: {user['first_name']} {user['last_name']} (id{user['id']})"
         except vk_api.exceptions.ApiError as e:
             if e.code == 9:
-                time.sleep(5)
+                time.sleep(4)
                 continue
             return f"❌ Сбой VK Userbot: [{e.code}] {e}"
         except Exception as e:
@@ -154,7 +150,7 @@ async def main():
             payload="🔥 3 главных правила успешного первого свидания:\n1. Будьте собой и расслабьтесь.\n2. Искренне интересуйтесь собеседником.\n3. Выбирайте уютное место с возможностью спокойно поговорить!|||💡 Секрет легкого диалога: задавайте открытые вопросы, на которые нельзя ответить просто «да» или «нет»!"
         )
 
-    # 2. Обработка команд пульта из Telegram (/queue, /approve, /say, /status)
+    # 2. Обработка команд пульта из Telegram (включая нажатия на кнопки!)
     process_pager_updates()
     
     # 3. Проверка серверов Hugging Face (Антисон)
@@ -163,7 +159,7 @@ async def main():
     # 4. Тест Userbot и отправка сообщения боту Купидон
     tg_status, live_cupid_test = await test_telegram_userbot()
     
-    # 5. Проверка подключения ВКонтакте с защитой от флуда
+    # 5. Проверка подключения ВКонтакте
     vk_status = test_vk_userbot()
     
     # 6. Тестирование ИИ-мозга
@@ -181,7 +177,7 @@ async def main():
         f"🌐 <b>3. ВКонтакте Userbot:</b> {vk_status}\n\n"
         f"🧠 <b>4. ИИ-Мозг (QA-Тест):</b>\n{ai_status}\n\n"
         f"🛡 <b>5. Модерация спама:</b>\n" + "\n".join(mod_results) + "\n\n"
-        "💡 <i>Команды пульта: /queue (очередь), /approve &lt;ID&gt; &lt;вариант&gt;, /say &lt;кому&gt; &lt;текст&gt;, /status</i>"
+        "💡 <i>Команды пульта: /queue (очередь с кнопками), /say &lt;кому&gt; &lt;текст&gt;, /status</i>"
     )
 
     send_telegram_report(report)
