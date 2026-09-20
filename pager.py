@@ -8,7 +8,6 @@ from publisher import publish_approved_post
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
 
-# Буфер для логов ошибок
 ERR_BUF = io.StringIO()
 _err_handler = logging.StreamHandler(ERR_BUF)
 _err_handler.setLevel(logging.WARNING)
@@ -34,6 +33,35 @@ def send_msg(text: str, reply_markup=None):
 
 def handle_status(args=""):
     send_msg("🟢 <b>Агент активен:</b> Все контуры функционируют штатно.")
+
+def handle_models(args=""):
+    """Опрашивает API напрямую и выдаёт реальный список моделей в чат."""
+    from modelcatalog import list_google, list_groq
+    send_msg("📡 <i>Опрашиваю API Google и Groq на доступные модели...</i>")
+    
+    g_key = os.getenv("GEMINI_API_KEY", "")
+    q_key = os.getenv("GROQ_API_KEY", "")
+    
+    out = ["📡 <b>[ЖИВОЙ КАТАЛОГ МОДЕЛЕЙ ИЗ API]</b>\n"]
+    
+    g_models = [m for m in list_google(g_key) if "flash" in m]
+    out.append("🔹 <b>Google Gemini (flash):</b>")
+    if g_models:
+        for m in g_models[-6:]:
+            out.append(f"  • <code>{m}</code>")
+    else:
+        out.append("  <i>Нет ответа от API или неверный ключ</i>")
+
+    q_models = [m for m in list_groq(q_key) if "llama" in m or "70b" in m]
+    out.append("\n🔹 <b>Groq:</b>")
+    if q_models:
+        for m in q_models[:6]:
+            out.append(f"  • <code>{m}</code>")
+    else:
+        out.append("  <i>Нет ответа от API</i>")
+        
+    out.append("\n💡 <i>Любую модель можно закрепить в Secrets через MODEL_GEMINI=...</i>")
+    send_msg("\n".join(out))
 
 def handle_errors(args=""):
     ERR_BUF.seek(0)
@@ -100,6 +128,7 @@ COMMANDS = {
     "/queue": handle_queue,
     "/say": handle_say,
     "/doctor": handle_doctor,
+    "/models": handle_models,
     "/errors": handle_errors,
 }
 
@@ -113,6 +142,7 @@ def process_pager_updates():
             update_id = u["update_id"]
             requests.get(url, params={"offset": update_id + 1, "timeout": 0}, timeout=4)
             
+            # Клик по инлайн-кнопкам
             if "callback_query" in u:
                 cb = u["callback_query"]
                 sender_id = str(cb.get("from", {}).get("id", ""))
@@ -130,6 +160,7 @@ def process_pager_updates():
                     handle_reject(int(d_id))
                 continue
 
+            # Текстовые команды
             m = u.get("message", {})
             sender_id = str(m.get("chat", {}).get("id", ""))
             if sender_id != str(ADMIN_CHAT_ID):
