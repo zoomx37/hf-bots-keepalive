@@ -18,6 +18,7 @@ import vkrate
 
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
+VK_ENABLED = os.getenv("VK_ENABLED", "true").lower() == "true"
 
 SPACES = [
     "opion2008/cupidon",
@@ -26,34 +27,7 @@ SPACES = [
 ]
 
 def send_telegram_report(message: str):
-    if not TG_BOT_TOKEN:
-        print("[REPORT LOG]\n" + message)
-        return
-    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": ADMIN_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    try:
-        r = requests.post(url, json=payload, timeout=15)
-        if r.status_code == 200:
-            return
-    except Exception:
-        pass
-    
-    try:
-        clean_text = (
-            message.replace("<b>", "").replace("</b>", "")
-                   .replace("<i>", "").replace("</i>", "")
-                   .replace("<code>", "").replace("</code>", "")
-        )
-        payload["text"] = clean_text
-        payload.pop("parse_mode", None)
-        requests.post(url, json=payload, timeout=15)
-    except Exception as e:
-        print(f"❌ Ошибка отправки: {e}")
+    notify(message, html=True)
 
 def run_keepalive_check() -> list[str]:
     hf_token = os.getenv("HF_TOKEN")
@@ -68,11 +42,13 @@ def run_keepalive_check() -> list[str]:
             if res.status_code == 200:
                 results.append(f"• <b>{space}</b>: ✅ Работает (200 OK)")
             else:
-                if hf_api: hf_api.restart_space(repo_id=space)
+                if hf_api:
+                    hf_api.restart_space(repo_id=space)
                 results.append(f"• <b>{space}</b>: ⚠️ Код {res.status_code} ➔ Перезапущен")
         except Exception:
             try:
-                if hf_api: hf_api.restart_space(repo_id=space)
+                if hf_api:
+                    hf_api.restart_space(repo_id=space)
                 results.append(f"• <b>{space}</b>: 🚨 Спал ➔ Принудительно разбужен")
             except Exception as err:
                 results.append(f"• <b>{space}</b>: ❌ Ошибка ({err})")
@@ -102,6 +78,9 @@ async def test_telegram_userbot() -> tuple[str, str]:
         return f"❌ Сбой TG Userbot: {e}", "Ошибка"
 
 def test_vk_userbot() -> str:
+    if not VK_ENABLED:
+        return "⏸️ ВК на паузе (VK_ENABLED=false)"
+        
     vk_token = os.getenv("VK_TOKEN")
     if not vk_token:
         return "⚠️ Не задан VK_TOKEN"
@@ -112,7 +91,7 @@ def test_vk_userbot() -> str:
         return f"✅ Подключен: {user['first_name']} {user['last_name']} (id{user['id']})"
     except Exception as e:
         err = str(e)
-        if "[9]" in err:
+        if "[9]" in err or "Flood control" in err:
             return "⚠️ ВК ожидает паузы ([9] Flood control)"
         return f"❌ {err[:70]}"
 
@@ -146,7 +125,7 @@ async def main():
         # 4. Проверка VK через vkrate
         vk_status = test_vk_userbot()
         
-        # 5. Тест ИИ-мозга с фильтром иероглифов
+        # 5. Тест ИИ-мозга из живого каталога
         ai_status = test_ai_qa_reasoning()
 
         # 6. Автомодерация спама
@@ -160,7 +139,7 @@ async def main():
             f"🌐 <b>3. ВКонтакте Userbot:</b> {vk_status}\n\n"
             f"🧠 <b>4. ИИ-Мозг (QA-Тест):</b>\n{ai_status}\n\n"
             f"🛡 <b>5. Модерация спама:</b>\n" + "\n".join(mod_results) + "\n\n"
-            "💡 <i>Команды: /queue (кнопки), /doctor (диагностика), /errors (журнал), /say</i>"
+            "💡 <i>Команды: /models (список ИИ), /doctor (диагностика), /queue (кнопки), /errors</i>"
         )
 
         send_telegram_report(report)
