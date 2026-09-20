@@ -1,25 +1,20 @@
 import os
 import asyncio
 import html
-import time
+import traceback
 import requests
 from huggingface_hub import HfApi
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-import vk_api
 
 from llm import ask_llm
 from db import init_db
 from drafts import add_draft, get_pending_drafts
 from pager import process_pager_updates
 from tg_userbot import run_cupidon_live_test
-
-# Безопасное подключение модератора (скрипт не упадет, если файл еще не создан)
-try:
-    from moderator import run_moderation_check
-except Exception:
-    def run_moderation_check():
-        return ["• ВК qp_on: Модератор в процессе калибровки"]
+from moderator import run_moderation_check
+from notifier import notify
+import vkrate
 
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
@@ -44,27 +39,21 @@ def send_telegram_report(message: str):
     try:
         r = requests.post(url, json=payload, timeout=15)
         if r.status_code == 200:
-            print("✅ Отчёт доставлен в Telegram (HTML).")
             return
     except Exception:
         pass
     
-    # Fallback на чистый текст
     try:
         clean_text = (
-            message.replace("<b>", "")
-                   .replace("</b>", "")
-                   .replace("<i>", "")
-                   .replace("</i>", "")
-                   .replace("<code>", "")
-                   .replace("</code>", "")
+            message.replace("<b>", "").replace("</b>", "")
+                   .replace("<i>", "").replace("</i>", "")
+                   .replace("<code>", "").replace("</code>", "")
         )
         payload["text"] = clean_text
         payload.pop("parse_mode", None)
         requests.post(url, json=payload, timeout=15)
-        print("✅ Отчёт доставлен в Telegram (Plain Text).")
     except Exception as e:
-        print(f"❌ Ошибка отправки отчёта: {e}")
+        print(f"❌ Ошибка отправки: {e}")
 
 def run_keepalive_check() -> list[str]:
     hf_token = os.getenv("HF_TOKEN")
@@ -79,13 +68,11 @@ def run_keepalive_check() -> list[str]:
             if res.status_code == 200:
                 results.append(f"• <b>{space}</b>: ✅ Работает (200 OK)")
             else:
-                if hf_api:
-                    hf_api.restart_space(repo_id=space)
+                if hf_api: hf_api.restart_space(repo_id=space)
                 results.append(f"• <b>{space}</b>: ⚠️ Код {res.status_code} ➔ Перезапущен")
         except Exception:
             try:
-                if hf_api:
-                    hf_api.restart_space(repo_id=space)
+                if hf_api: hf_api.restart_space(repo_id=space)
                 results.append(f"• <b>{space}</b>: 🚨 Спал ➔ Принудительно разбужен")
             except Exception as err:
                 results.append(f"• <b>{space}</b>: ❌ Ошибка ({err})")
@@ -108,10 +95,7 @@ async def test_telegram_userbot() -> tuple[str, str]:
         
         me = await client.get_me()
         user_info = f"@{me.username}" if me.username else me.first_name
-        
-        # Живой тест диалога с ботом Купидон
         live_test_res = await run_cupidon_live_test(client)
-        
         await client.disconnect()
         return f"✅ Подключен: {user_info} (ID: {me.id})", live_test_res
     except Exception as e:
@@ -123,16 +107,14 @@ def test_vk_userbot() -> str:
         return "⚠️ Не задан VK_TOKEN"
 
     try:
-        time.sleep(1)
-        vk_session = vk_api.VkApi(token=vk_token, api_version="5.131")
-        vk = vk_session.get_api()
-        user = vk.users.get()[0]
+        session = vkrate.get_vk_session(vk_token)
+        user = vkrate.vk_call(session, "users.get")[0]
         return f"✅ Подключен: {user['first_name']} {user['last_name']} (id{user['id']})"
     except Exception as e:
-        err_msg = str(e)
-        if "Flood control" in err_msg:
+        err = str(e)
+        if "[9]" in err:
             return "⚠️ ВК ожидает паузы ([9] Flood control)"
-        return f"❌ Сбой VK Userbot: {err_msg}"
+        return f"❌ {err[:70]}"
 
 def test_ai_qa_reasoning() -> str:
     prompt = "Оцени кратко (в 2 предложения): алгоритм поиска пары в боте 'Купидон' по общим интересам."
@@ -144,46 +126,49 @@ async def main():
     print("🚀 [ИИ-Агент] Инициализация базы данных и запуск цикла...")
     init_db()
     
-    # 1. Если очередь черновиков пуста — создаем пост для канала @qpd_n
-    if not get_pending_drafts():
-        add_draft(
-            draft_type="post",
-            target="@qpd_n",
-            payload="🔥 3 главных правила успешного первого свидания:\n1. Будьте собой и расслабьтесь.\n2. Искренне интересуйтесь собеседником.\n3. Выбирайте уютное место с возможностью спокойно поговорить!|||💡 Секрет легкого диалога: задавайте открытые вопросы, на которые нельзя ответить просто «да» или «нет»!"
+    try:
+        if not get_pending_drafts():
+            add_draft(
+                draft_type="post",
+                target="@qpd_n",
+                payload="🔥 3 главных правила успешного первого свидания:\n1. Будьте собой и расслабьтесь.\n2. Искренне интересуйтесь собеседником.\n3. Выбирайте уютное место с возможностью спокойно поговорить!|||💡 Секрет легкого диалога: задавайте открытые вопросы, на которые нельзя ответить просто «да» или «нет»!"
+            )
+
+        # 1. Чтение команд и кликов по кнопкам
+        process_pager_updates()
+        
+        # 2. Антисон спейсов
+        servers_status = run_keepalive_check()
+        
+        # 3. Живой тест TG Userbot
+        tg_status, live_cupid_test = await test_telegram_userbot()
+        
+        # 4. Проверка VK через vkrate
+        vk_status = test_vk_userbot()
+        
+        # 5. Тест ИИ-мозга с фильтром иероглифов
+        ai_status = test_ai_qa_reasoning()
+
+        # 6. Автомодерация спама
+        mod_results = run_moderation_check()
+
+        report = (
+            "🤖 <b>[ОТЧЕТ АВТОНОМНОГО ИИ-АГЕНТА КУПИДОН]</b>\n\n"
+            "📡 <b>1. Антисон & Серверы:</b>\n" + "\n".join(servers_status) + "\n\n"
+            f"📱 <b>2. Telegram Userbot:</b> {tg_status}\n"
+            f"💬 <b>Живой тест @AI_cupidon_bot:</b> {live_cupid_test}\n\n"
+            f"🌐 <b>3. ВКонтакте Userbot:</b> {vk_status}\n\n"
+            f"🧠 <b>4. ИИ-Мозг (QA-Тест):</b>\n{ai_status}\n\n"
+            f"🛡 <b>5. Модерация спама:</b>\n" + "\n".join(mod_results) + "\n\n"
+            "💡 <i>Команды: /queue (кнопки), /doctor (диагностика), /errors (журнал), /say</i>"
         )
 
-    # 2. Обработка команд пульта из Telegram (/queue, /approve, /say, /status)
-    process_pager_updates()
-    
-    # 3. Проверка серверов Hugging Face (Антисон)
-    servers_status = run_keepalive_check()
-    
-    # 4. Тест Userbot и отправка сообщения боту Купидон
-    tg_status, live_cupid_test = await test_telegram_userbot()
-    
-    # 5. Проверка подключения ВКонтакте
-    vk_status = test_vk_userbot()
-    
-    # 6. Тестирование ИИ-мозга
-    ai_status = test_ai_qa_reasoning()
-
-    # 7. Модерация спама
-    mod_results = run_moderation_check()
-
-    # 8. Формирование и отправка итоговой сводки
-    report = (
-        "🤖 <b>[ОТЧЕТ АВТОНОМНОГО ИИ-АГЕНТА КУПИДОН]</b>\n\n"
-        "📡 <b>1. Антисон & Серверы:</b>\n" + "\n".join(servers_status) + "\n\n"
-        f"📱 <b>2. Telegram Userbot:</b> {tg_status}\n"
-        f"💬 <b>Живой тест @AI_cupidon_bot:</b> {live_cupid_test}\n\n"
-        f"🌐 <b>3. ВКонтакте Userbot:</b> {vk_status}\n\n"
-        f"🧠 <b>4. ИИ-Мозг (QA-Тест):</b>\n{ai_status}\n\n"
-        f"🛡 <b>5. Модерация спама:</b>\n" + "\n".join(mod_results) + "\n\n"
-        "💡 <i>Команды пульта: /queue (очередь), /approve &lt;ID&gt; &lt;вариант&gt;, /say &lt;кому&gt; &lt;текст&gt;, /status</i>"
-    )
-
-    send_telegram_report(report)
-    print("✅ [ИИ-Агент] Цикл успешно завершён!")
+        send_telegram_report(report)
+        print("✅ [ИИ-Агент] Цикл успешно завершён!")
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"💥 Сбой цикла: {e}")
+        notify(f"💥 <b>ОШИБКА ЦИКЛА:</b>\n<pre>{tb[-2500:]}</pre>")
 
 if __name__ == "__main__":
     asyncio.run(main())
