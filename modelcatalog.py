@@ -1,18 +1,35 @@
 import os
+import re
 import logging
 import requests
 
 log = logging.getLogger("modelcatalog")
 
+BAD = re.compile(r"preview|exp|omni|tts|image|audio|embed|aqa|guard", re.I)
+
+def _ver(m: str) -> float:
+    nums = re.findall(r"\d+(?:\.\d+)?", m)
+    return float(nums[0]) if nums else 0.0
+
+def pick_gemini(models: list[str]) -> str:
+    """Выбирает старшую Flash-модель по номеру версии (3.8 > 3.7), отсекая preview/omni."""
+    ok = [
+        m for m in models
+        if "flash" in m.lower() and not BAD.search(m)
+        and "lite" not in m.lower() and "thinking" not in m.lower()
+    ]
+    if not ok:
+        ok = [m for m in models if "flash" in m.lower() and not BAD.search(m)]
+    return max(ok, key=_ver) if ok else None
+
 def list_google(key: str) -> list[str]:
-    """Запрашивает у Google список всех моделей, поддерживающих генерацию текста."""
     if not key:
         return []
     try:
         r = requests.get(
             "https://generativelanguage.googleapis.com/v1beta/models",
             params={"key": key},
-            timeout=20
+            timeout=15
         ).json()
         models = [
             m["name"].replace("models/", "")
@@ -24,68 +41,33 @@ def list_google(key: str) -> list[str]:
         log.warning(f"Ошибка получения моделей Google: {e}")
         return []
 
-def list_groq(key: str) -> list[str]:
-    """Запрашивает список доступных моделей у Groq."""
-    if not key:
-        return []
-    try:
-        r = requests.get(
-            "https://api.groq.com/openai/v1/models",
-            headers={"Authorization": f"Bearer {key}"},
-            timeout=20
-        ).json()
-        return sorted(m["id"] for m in r.get("data", []))
-    except Exception as e:
-        log.warning(f"Ошибка получения моделей Groq: {e}")
-        return []
-
 def list_openrouter() -> list[str]:
-    """Запрашивает список доступных моделей у OpenRouter."""
     try:
-        r = requests.get("https://openrouter.ai/api/v1/models", timeout=20).json()
-        return sorted(m["id"] for m in r.get("data", []))
+        r = requests.get("https://openrouter.ai/api/v1/models", timeout=15).json()
+        return sorted(m["id"] for m in r.get("data", []) if ":free" in m.get("id", ""))
     except Exception as e:
         log.warning(f"Ошибка получения моделей OpenRouter: {e}")
         return []
 
-def resolve_model(env_name: str, prefer_fn, lister_fn, key: str) -> str:
-    """env-переопределение > самая свежая модель из живого API."""
-    custom = os.getenv(env_name)
-    if custom:
-        return custom.strip()
-    try:
-        models = lister_fn(key)
-        hits = [m for m in models if prefer_fn(m)]
-        if hits:
-            return hits[-1]  # Последняя по алфавиту/версии = самая новая
-    except Exception as e:
-        log.warning(f"{env_name}: автодетект не удался ({e})")
-    return None
-
 def get_active_models():
-    """Определяет актуальную цепочку моделей на основе ответа API."""
+    """Определяет актуальную цепочку моделей."""
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
 
-    g = resolve_model(
-        "MODEL_GEMINI",
-        lambda m: "flash" in m and "lite" not in m and "thinking" not in m,
-        list_google,
-        gemini_key
-    )
-    q = resolve_model(
-        "MODEL_GROQ",
-        lambda m: "70b" in m or "llama-3" in m,
-        list_groq,
-        groq_key
-    )
-    o = resolve_model(
-        "MODEL_OPENROUTER",
-        lambda m: "llama-3.3-70b" in m or "free" in m,
-        lambda _: list_openrouter(),
-        openrouter_key
-    )
+    # 1. Gemini: приоритет env-переменной > умный pick()
+    custom_gemini = os.getenv("MODEL_GEMINI")
+    if custom_gemini:
+        g = custom_gemini.strip()
+    else:
+        g = pick_gemini(list_google(gemini_key)) or "gemini-3.8-flash"
 
-    log.info(f"Активные модели: Gemini={g}, Groq={q}, OpenRouter={o}")
-    return {"gemini": g, "groq": q, "openrouter": o}
+    # 2. OpenRouter: подтвержденный glm-5.2:free + бэкапы
+    custom_or = os.getenv("MODEL_OPENROUTER", "z-ai/glm-5.2:free").strip()
+    backups_str = os.getenv("OPENROUTER_BACKUPS", "deepseek/deepseek-chat-v3:free,qwen/qwen-2.5-72b-instruct:free")
+    backups = [m.strip() for m in backups_str.split(",") if m.strip()]
+
+    log.info(f"Активные модели: Gemini={g}, OpenRouter={custom_or}, Backups={backups}")
+    return {
+        "gemini": g,
+        "openrouter_primary": custom_or,
+        "openrouter_backups": backups
+    }
