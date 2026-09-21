@@ -7,6 +7,7 @@ from openai import OpenAI
 from modelcatalog import get_active_models
 
 log = logging.getLogger("llm")
+_cooldown = {}  # Запоминает модели с ошибкой 503 на 2 минуты
 
 def _has_garbage(text: str) -> bool:
     if not text:
@@ -17,7 +18,6 @@ def _has_garbage(text: str) -> bool:
     return False
 
 def get_all_gemini_keys() -> list[str]:
-    """Собирает основной и все запасные ключи Gemini в единый пул."""
     keys = []
     main_k = os.getenv("GEMINI_API_KEY", "").strip()
     if main_k:
@@ -32,7 +32,7 @@ def get_all_gemini_keys() -> list[str]:
 def ask_gemini_cascade(prompt: str, system_prompt: str, primary_model: str, temperature: float = 0.7) -> tuple[str, str]:
     gemini_keys = get_all_gemini_keys()
     if not gemini_keys:
-        raise ValueError("Нет доступных ключей GEMINI_API_KEY")
+        raise ValueError("Нет ключей GEMINI_API_KEY")
 
     candidates = [primary_model] if primary_model else []
     for fallback in ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]:
@@ -45,12 +45,17 @@ def ask_gemini_cascade(prompt: str, system_prompt: str, primary_model: str, temp
         "generationConfig": {"temperature": temperature}
     }
 
-    # Автоматический перебор всех запасных ключей и моделей Gemini
+    last_err = None
     for key_idx, key in enumerate(gemini_keys, 1):
         for model in candidates:
+            cd_key = f"{key_idx}_{model}"
+            if time.time() < _cooldown.get(cd_key, 0):
+                continue
+
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
             try:
-                r = requests.post(url, json=payload, timeout=20)
+                # Таймаут увеличен до 60 секунд!
+                r = requests.post(url, json=payload, timeout=60)
                 if r.status_code == 200:
                     data = r.json()
                     if "candidates" in data and len(data["candidates"]) > 0:
@@ -59,57 +64,51 @@ def ask_gemini_cascade(prompt: str, system_prompt: str, primary_model: str, temp
                             tag = f" [Ключ #{key_idx}]" if len(gemini_keys) > 1 else ""
                             return text, f"Gemini ({model}){tag}"
                 elif r.status_code in (429, 503):
-                    log.warning(f"⚠️ Gemini {model} на ключе #{key_idx} перегруз ({r.status_code}). Пробую дальше...")
-                    time.sleep(1)
+                    _cooldown[cd_key] = time.time() + 120  # Кулдаун 2 минуты
+                    log.warning(f"⚠️ Gemini {model} на ключе #{key_idx} (503). Перехожу к следующей...")
                     continue
             except Exception as e:
+                last_err = e
                 log.warning(f"Gemini {model} сбой: {e}")
                 continue
 
-    raise RuntimeError("Все ключи и модели Gemini временно исчерпаны")
+    raise RuntimeError(f"Все ключи и модели Gemini временно исчерпаны: {last_err}")
 
 def ask_openrouter(prompt: str, system_prompt: str, model_id: str, temperature: float = 0.7) -> tuple[str, str]:
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         raise ValueError("OPENROUTER_API_KEY отсутствует")
         
-    client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key, timeout=25)
-    for attempt in range(2):
-        try:
-            r = client.chat.completions.create(
-                model=model_id or "z-ai/glm-5.2:free",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1000,
-                temperature=temperature
-            )
-            content = r.choices[0].message.content.strip()
-            if _has_garbage(content):
-                raise ValueError(f"OpenRouter {model_id} вернул мусорные токены")
-            return content, f"OpenRouter ({model_id})"
-        except Exception as e:
-            if "429" in str(e) and attempt == 0:
-                time.sleep(3)
-                continue
-            raise
+    client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key, timeout=45)
+    r = client.chat.completions.create(
+        model=model_id or "z-ai/glm-5.2:free",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=1000,
+        temperature=temperature
+    )
+    content = r.choices[0].message.content.strip()
+    if _has_garbage(content):
+        raise ValueError("OpenRouter вернул мусорные токены")
+    return content, f"OpenRouter ({model_id})"
 
 def ask_llm(prompt: str, system_prompt: str = "Ты — ИИ-QA инженер и аналитик.", temperature: float = 0.7) -> tuple[str, str]:
     active = get_active_models()
     
-    # 1. Пул ключей Gemini (3.8 -> 3.7 -> 3.6)
+    # 1. Gemini
     try:
         return ask_gemini_cascade(prompt, system_prompt, active.get("gemini"), temperature=temperature)
     except Exception as e:
-        log.warning(f"⚠️ [Fallback] Пул Gemini сбой ({e}), переход на OpenRouter...")
+        log.warning(f"⚠️ [Fallback] Gemini сбой ({e}), переход на OpenRouter...")
 
-    # 2. Резерв OpenRouter
+    # 2. OpenRouter
     primary_or = active.get("openrouter_primary", "z-ai/glm-5.2:free")
     try:
         return ask_openrouter(prompt, system_prompt, primary_or, temperature=temperature)
-    except Exception as e:
-        log.warning(f"⚠️ [Fallback] OpenRouter {primary_or} сбой ({e}), перебор бэкапов...")
+    except Exception:
+        pass
 
     for backup_model in active.get("openrouter_backups", []):
         try:
