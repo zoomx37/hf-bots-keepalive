@@ -22,7 +22,7 @@ def get_all_gemini_keys() -> list[str]:
     main_k = os.getenv("GEMINI_API_KEY", "").strip()
     if main_k:
         keys.append(main_k)
-    backup_str = os.getenv("GEMINI_BACKUP_KEYS", "") or os.getenv("GEMINI_API_KEYS", "")
+    backup_str = os.getenv("GEMINI_BACKUP_KEYS", "")
     for k in backup_str.split(","):
         k = k.strip()
         if k and k not in keys:
@@ -45,7 +45,7 @@ def ask_gemini_cascade(prompt: str, system_prompt: str, primary_model: str, temp
         "generationConfig": {"temperature": temperature}
     }
 
-    # Перебор пула ключей и линейки моделей
+    # Автоматический перебор всех запасных ключей и моделей Gemini
     for key_idx, key in enumerate(gemini_keys, 1):
         for model in candidates:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
@@ -56,14 +56,14 @@ def ask_gemini_cascade(prompt: str, system_prompt: str, primary_model: str, temp
                     if "candidates" in data and len(data["candidates"]) > 0:
                         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                         if not _has_garbage(text):
-                            key_tag = f" [Ключ #{key_idx}]" if len(gemini_keys) > 1 else ""
-                            return text, f"Gemini ({model}){key_tag}"
+                            tag = f" [Ключ #{key_idx}]" if len(gemini_keys) > 1 else ""
+                            return text, f"Gemini ({model}){tag}"
                 elif r.status_code in (429, 503):
-                    log.warning(f"⚠️ Gemini {model} на ключе #{key_idx} лимит/перегруз ({r.status_code}). Пробую дальше...")
+                    log.warning(f"⚠️ Gemini {model} на ключе #{key_idx} перегруз ({r.status_code}). Пробую дальше...")
                     time.sleep(1)
                     continue
             except Exception as e:
-                log.warning(f"Gemini {model} ошибка: {e}")
+                log.warning(f"Gemini {model} сбой: {e}")
                 continue
 
     raise RuntimeError("Все ключи и модели Gemini временно исчерпаны")
@@ -104,12 +104,12 @@ def ask_llm(prompt: str, system_prompt: str = "Ты — ИИ-QA инженер �
     except Exception as e:
         log.warning(f"⚠️ [Fallback] Пул Gemini сбой ({e}), переход на OpenRouter...")
 
-    # 2. Резерв: OpenRouter
+    # 2. Резерв OpenRouter
     primary_or = active.get("openrouter_primary", "z-ai/glm-5.2:free")
     try:
         return ask_openrouter(prompt, system_prompt, primary_or, temperature=temperature)
     except Exception as e:
-        log.warning(f"⚠️ [Fallback] OpenRouter сбой ({e}), перебор бэкапов...")
+        log.warning(f"⚠️ [Fallback] OpenRouter {primary_or} сбой ({e}), перебор бэкапов...")
 
     for backup_model in active.get("openrouter_backups", []):
         try:
