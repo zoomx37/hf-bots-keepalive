@@ -16,19 +16,19 @@ def _h():
     return {"X-Key": f"Key {KEY}", "X-Secret": f"Secret {SECRET}"}
 
 def remove_watermark(image_bytes: bytes) -> bytes:
-    """Обрезает нижнюю полоску с логотипом pollinations.ai."""
+    """Бесшовно срезает нижнюю полосу с вотермаркой pollinations.ai."""
     if not image_bytes:
         return None
     try:
         im = Image.open(io.BytesIO(image_bytes))
         w, h = im.size
-        # Отрезаем нижние 48 пикселей с вотермаркой
-        cropped = im.crop((0, 0, w, h - 48))
+        # Срезаем нижние 5% высоты (где сидит логотип), сохраняя композицию
+        cropped = im.crop((0, 0, w, int(h * 0.95)))
         out = io.BytesIO()
         cropped.save(out, format="JPEG", quality=95)
         return out.getvalue()
     except Exception as e:
-        log.warning(f"Не удалось обрезать вотермарку: {e}")
+        log.warning(f"Ошибка обрезки вотермарки: {e}")
         return image_bytes
 
 def generate_pollinations(prompt: str) -> bytes:
@@ -36,11 +36,10 @@ def generate_pollinations(prompt: str) -> bytes:
         clean_prompt = prompt.replace("[КАРТИНКА:", "").replace("]", "").strip()
         url = f"https://image.pollinations.ai/prompt/{quote(clean_prompt)}?width=1024&height=1024&nologo=true&nofeed=true"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         }
-        r = requests.get(url, headers=headers, timeout=60)
+        r = requests.get(url, headers=headers, timeout=45)
         if r.status_code == 200 and r.content and len(r.content) > 2000:
-            # Убираем вотермарку перед возвратом
             return remove_watermark(r.content)
         log.warning(f"Pollinations статус: {r.status_code}")
     except Exception as e:
@@ -48,7 +47,7 @@ def generate_pollinations(prompt: str) -> bytes:
     return None
 
 def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
-    # 1. Если заданы ключи Kandinsky (у него вотермарки нет изначально)
+    # 1. Если заданы ключи Kandinsky (у него вотермарки нет вовсе)
     if KEY and SECRET:
         try:
             body = {
@@ -62,7 +61,7 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024) -> bytes:
             r = requests.post(f"{BASE}/key/api/v1/text2image/run", json=body, headers=_h(), timeout=20).json()
             uuid = r.get("uuid")
             if uuid:
-                for _ in range(18):
+                for _ in range(16):
                     time.sleep(2.5)
                     st = requests.get(f"{BASE}/key/api/v1/text2image/status/{uuid}", headers=_h(), timeout=15).json()
                     if st.get("status") == "DONE":
