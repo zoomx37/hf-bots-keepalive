@@ -37,15 +37,15 @@ def handle_models(args=""):
     send_msg("\n".join(out))
 
 def handle_testimg(args=""):
-    send_msg("🎨 <i>Генерирую тестовую иллюстрацию... (30-40 сек)</i>")
+    send_msg("🎨 <i>Генерирую тестовую иллюстрацию без вотермарки...</i>")
     from imagegen import generate_image
     from notifier import PAGER_TOKEN, CHAT_ID
-    photo = generate_image("уютный вечер в кафе, пара пьет кофе, теплый свет, романтичная плоская иллюстрация")
+    photo = generate_image("пара в уютном кафе пьет кофе, теплый свет, романтичная эстетичная иллюстрация")
     if photo:
         requests.post(
             f"https://api.telegram.org/bot{PAGER_TOKEN}/sendPhoto",
-            data={"chat_id": CHAT_ID, "caption": "🎨 <b>Тест генератора картинок успешен!</b>", "parse_mode": "HTML"},
-            files={"photo": ("test.jpg", io.BytesIO(photo), "image/jpeg")}, timeout=30
+            data={"chat_id": CHAT_ID, "caption": "🎨 <b>Тест генератора картинок успешен (без вотермарки)!</b>", "parse_mode": "HTML"},
+            files={"photo": ("test.jpg", io.BytesIO(photo), "image/jpeg")}, timeout=35
         )
     else:
         send_msg("❌ Не удалось сгенерировать изображение.")
@@ -73,9 +73,9 @@ def handle_queue(args=""):
         
         msg = f"📋 <b>Черновик #{d['id']} [{d['type']}]</b> (Канал: <code>{target_info}</code>)\n\n"
         for idx, var in enumerate(variants, 1):
-            clean_preview = var.split("[КАРТИНКА:")[0].strip()
+            clean_preview = var.split("[КАРТИНКА:")[0].replace("[ХЕДЛАЙН:", "📌 <b>").replace("]", "</b>\n").strip()
             has_img = " 🖼 <i>(с иллюстрацией)</i>" if "[КАРТИНКА:" in var else ""
-            msg += f"<b>Вариант {idx}{has_img}:</b>\n<i>«{clean_preview}»</i>\n\n"
+            msg += f"<b>Вариант {idx}{has_img}:</b>\n{clean_preview}\n\n"
 
         inline_keyboard = [
             [
@@ -97,18 +97,17 @@ def handle_approve(draft_id: int, variant: int):
     from drafts import get_pending_drafts, approve_draft
     drafts = [d for d in get_pending_drafts() if d['id'] == draft_id]
     if not drafts:
-        send_msg(f"⚠️ Черновик #{draft_id} не найден.")
+        send_msg(f"⚠️ Черновик #{draft_id} уже обработан или не найден.")
         return
         
     d = drafts[0]
+    approve_draft(draft_id, variant)
     if d['type'] == 'post':
         from news import publish_approved_news
-        approve_draft(draft_id, variant)
         publish_approved_news(d['payload'], variant)
     else:
-        success, text = approve_draft(draft_id, variant)
         from publisher import publish_approved_post
-        publish_approved_post(target="", text=text)
+        publish_approved_post(target="", text=d['payload'])
         send_msg(f"✅ Черновик #{draft_id} утверждён.")
 
 def handle_reject(draft_id: int):
@@ -121,15 +120,26 @@ def process_pager_updates():
     if not TG_BOT_TOKEN: return
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates"
     try:
-        res = requests.get(url, params={"timeout": 3}, timeout=6).json()
+        # Явно запрашиваем и сообщения, и нажатия на кнопки
+        res = requests.get(url, params={"timeout": 3, "allowed_updates": ["message", "callback_query"]}, timeout=6).json()
         for u in res.get("result", []):
             update_id = u["update_id"]
             requests.get(url, params={"offset": update_id + 1, "timeout": 0}, timeout=4)
             
+            # Нажатие на инлайн-кнопку
             if "callback_query" in u:
                 cb = u["callback_query"]
+                sender_id = str(cb.get("from", {}).get("id", ""))
+                if sender_id != str(ADMIN_CHAT_ID):
+                    continue
+                
                 data = cb.get("data", "")
-                requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb["id"], "text": "Действие принято!"})
+                # Моментальный всплывающий ответ пользователю
+                requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/answerCallbackQuery", json={
+                    "callback_query_id": cb["id"],
+                    "text": "🚀 Вариант принят! Запускаю публикацию..."
+                })
+                
                 if data.startswith("app_"):
                     _, d_id, v_idx = data.split("_")
                     handle_approve(int(d_id), int(v_idx))
@@ -138,6 +148,7 @@ def process_pager_updates():
                     handle_reject(int(d_id))
                 continue
 
+            # Текстовые команды
             m = u.get("message", {})
             text = m.get("text", "").strip()
             cmd = text.split()[0] if text else ""
