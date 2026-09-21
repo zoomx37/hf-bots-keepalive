@@ -11,7 +11,7 @@ log = logging.getLogger("moderator")
 VK_ENABLED = os.getenv("VK_ENABLED", "false").lower() == "true"
 VK_USER_TOKEN = os.getenv("VK_TOKEN", "").strip()
 VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN", "").strip()
-VK_GROUP_ID = 239533580  # ID сообщества qp_on
+VK_GROUP_ID = 239533580
 MOD_DRY_RUN = os.getenv("MOD_DRY_RUN", "false").lower() == "true"
 
 RULES = """Ты — строгий ИИ-модератор сообщества 'Купидон'. Оцени текст комментария.
@@ -37,11 +37,16 @@ def classify_text(text: str) -> dict:
     return {"verdict": "ok", "reason": "check_failed"}
 
 def run_moderation_check() -> list[str]:
+    # results инициализируется ДО любых try блоков, чтобы исключить NameError
+    results = []
+
     if not VK_ENABLED:
-        return ["• <b>ВК qp_on:</b> ⏸️ На карантине (VK_ENABLED=false)"]
-        
+        results.append("• <b>ВК qp_on:</b> ⏸️ На карантине (VK_ENABLED=false)")
+        return results
+
     if not VK_USER_TOKEN:
-        return ["• <b>ВК qp_on:</b> Требуется VK_TOKEN пользователя для чтения стены"]
+        results.append("• <b>ВК qp_on:</b> Пропущен (нет юзер-токена)")
+        return results
 
     try:
         sess_user = vkrate.get_vk_session(VK_USER_TOKEN)
@@ -50,7 +55,6 @@ def run_moderation_check() -> list[str]:
         
         checked = 0
         deleted = 0
-        
         del_token = VK_GROUP_TOKEN or VK_USER_TOKEN
         sess_del = vkrate.get_vk_session(del_token)
         
