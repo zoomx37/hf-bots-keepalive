@@ -28,13 +28,23 @@ TOPICS = [
 
 STYLE = f"""Ты — профессиональный SMM-редактор канала бота знакомств 'Купидон'. Формат поста:
 1) Яркий заголовок с одним тематическим эмодзи.
-2) Живой, полезный и увлекательный текст на 450–700 знаков (без канцелярита и банальностей).
-3) Интерактивный вопрос к читателям в конце для обсуждения.
-4) 3–4 хештега в конце: {BRAND_TAG} #знакомства #отношения #свидание (ротируй).
-5) Всего 3–5 эмодзи на весь пост — уместно и эстетично.
-6) В самой последней строке ОБЯЗАТЕЛЬНО добавь промпт для иллюстратора строго в формате:
-[КАРТИНКА: подробное описание красивой сцены свидания или общения, тёплый свет, кинематографично, без текста на изображении]
-Выведи только готовый текст поста. Никаких приписок от себя, никаких 'продолжение следует'."""
+2) Живой, полезный текст на 450–700 знаков.
+3) Интерактивный вопрос к читателям в конце.
+4) 3–4 хештега: {BRAND_TAG} #знакомства #отношения #свидание.
+5) Используй ТОЛЬКО HTML-теги: <b>жирный</b> и <i>курсив</i>.
+КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать звездочки **жирный** или Markdown!
+6) Последней строкой добавь:
+[КАРТИНКА: подробное описание сцены свидания или общения, тёплый свет, кинематографично, без текста на изображении]
+Выведи только готовый текст поста."""
+
+def clean_html_formatting(text: str) -> str:
+    """Превращает любые Markdown-звездочки ** в чистые HTML-теги <b>."""
+    if not text:
+        return ""
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__(.*?)__', r'<i>\1</i>', text)
+    text = re.sub(r'(?m)^\*\s+', '• ', text)
+    return text.strip()
 
 def db():
     c = sqlite3.connect("agent.db")
@@ -59,25 +69,23 @@ def pick_fresh_topic():
     return topic
 
 def generate_post_variants(topic: str):
-    prompt_v1 = f"Тема: {topic}. Сделай фокус на лёгкости и психологии общения.\n\nНе повторяй формулировки прошлых постов:\n{recent_posts()}"
-    prompt_v2 = f"Тема: {topic}. Сделай фокус на конкретных практических фишках и примерах.\n\nНе повторяй прошлые посты:\n{recent_posts()}"
+    prompt_v1 = f"Тема: {topic}. Фокус на психологии общения.\n\nНе повторяй прошлые посты:\n{recent_posts()}"
+    prompt_v2 = f"Тема: {topic}. Фокус на конкретных практических советах.\n\nНе повторяй прошлые посты:\n{recent_posts()}"
     
-    v1 = ask(prompt_v1, system=STYLE, temperature=0.85)
-    v2 = ask(prompt_v2, system=STYLE, temperature=0.9)
+    v1 = clean_html_formatting(ask(prompt_v1, system=STYLE, temperature=0.85))
+    v2 = clean_html_formatting(ask(prompt_v2, system=STYLE, temperature=0.9))
     return v1, v2
 
 IMG_PATTERN = re.compile(r"\[КАРТИНКА:\s*(.+?)\]", re.DOTALL | re.IGNORECASE)
 
 def publish_approved_news(payload: str, variant_idx: int = 1):
-    """Публикация поста с автогенерацией картинки при одобрении."""
     parts = payload.split("|||")
     channel_target = parts[0].strip() if len(parts) > 2 else "@qpd_n"
     variants = parts[1:] if len(parts) > 2 else parts
     
     idx = variant_idx - 1 if 0 <= variant_idx - 1 < len(variants) else 0
-    raw_text = variants[idx].strip()
+    raw_text = clean_html_formatting(variants[idx].strip())
     
-    # Ищем промпт для картинки
     img_match = IMG_PATTERN.search(raw_text)
     clean_text = IMG_PATTERN.sub("", raw_text).strip()
     
@@ -87,7 +95,7 @@ def publish_approved_news(payload: str, variant_idx: int = 1):
         notify(f"🎨 <i>Генерирую авторскую иллюстрацию к посту...</i>\n«{img_prompt[:90]}...»", html=True)
         photo_bytes = generate_image(img_prompt)
     
-    # 1. Публикация в Telegram (@qpd_n)
+    # 1. Telegram (@qpd_n)
     tg_ok = False
     if photo_bytes:
         tg_ok = tg_post_photo(channel_target, clean_text, photo_bytes)
@@ -95,7 +103,7 @@ def publish_approved_news(payload: str, variant_idx: int = 1):
         from publisher import post_to_telegram
         post_to_telegram(channel_target, clean_text)
         
-    # 2. Публикация во ВКонтакте (-239533580)
+    # 2. ВКонтакте (-239533580)
     vk_ok = False
     if photo_bytes:
         vk_ok = vk_post_photo(-239533580, clean_text, photo_bytes)
@@ -103,11 +111,10 @@ def publish_approved_news(payload: str, variant_idx: int = 1):
         from publisher import post_to_vk
         post_to_vk(-239533580, clean_text)
         
-    # Запись в историю опубликованных
     c = db()
     c.execute("INSERT INTO published VALUES(?,?,datetime('now'))", (channel_target, clean_text))
     c.commit()
     c.close()
     
     img_tag = " (с сгенерированной иллюстрацией 🖼)" if photo_bytes else ""
-    notify(f"✅ <b>Пост успешно опубликован в @qpd_n и vk.com/qp_on{img_tag}!</b>", html=True)
+    notify(f"✅ <b>Пост опубликован в @qpd_n и vk.com/qp_on{img_tag}!</b>", html=True)
