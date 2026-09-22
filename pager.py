@@ -17,7 +17,7 @@ def send_msg(text: str, reply_markup=None):
     notify(text, html=True)
 
 def handle_status(args=""):
-    send_msg("🟢 <b>Агент активен:</b> Все контуры функционируют штатно.")
+    send_msg("🟢 <b>Агент активен:</b> Все системы функционируют в штатном режиме.")
 
 def handle_models(args=""):
     from modelcatalog import list_google, list_openrouter
@@ -40,7 +40,7 @@ def handle_testimg(args=""):
     send_msg("🎨 <i>Генерирую тестовую иллюстрацию без вотермарки...</i>")
     from imagegen import generate_image
     from notifier import PAGER_TOKEN, CHAT_ID
-    photo = generate_image("пара в уютном кафе пьет кофе, теплый свет, романтичная эстетичная иллюстрация")
+    photo = generate_image("пара в уютном кафе пьет кофе, теплый свет, романтичная плоская иллюстрация")
     if photo:
         requests.post(
             f"https://api.telegram.org/bot{PAGER_TOKEN}/sendPhoto",
@@ -73,14 +73,13 @@ def handle_queue(args=""):
         
         msg = f"📋 <b>Черновик #{d['id']} [{d['type']}]</b> (Канал: <code>{target_info}</code>)\n\n"
         for idx, var in enumerate(variants, 1):
-            clean_preview = var.split("[КАРТИНКА:")[0].replace("[ХЕДЛАЙН:", "📌 <b>").replace("]", "</b>\n").strip()
-            has_img = " 🖼 <i>(с иллюстрацией)</i>" if "[КАРТИНКА:" in var else ""
-            msg += f"<b>Вариант {idx}{has_img}:</b>\n{clean_preview}\n\n"
+            clean_prev = var.split("[КАРТИНКА:")[0].replace("[ХЕДЛАЙН:", "📌 <b>").replace("]", "</b>\n").strip()
+            msg += f"<b>Вариант {idx}:</b>\n{clean_prev}\n\n"
 
         inline_keyboard = [
             [
-                {"text": "🔥 Одобрить Вариант 1", "callback_data": f"app_{d['id']}_1"},
-                {"text": "💡 Одобрить Вариант 2", "callback_data": f"app_{d['id']}_2"}
+                {"text": f"🔥 Одобрить Вариант 1", "callback_data": f"app_{d['id']}_1"},
+                {"text": f"💡 Одобрить Вариант 2", "callback_data": f"app_{d['id']}_2"}
             ],
             [
                 {"text": "🗑 Отклонить черновик", "callback_data": f"rej_{d['id']}"}
@@ -93,76 +92,96 @@ def handle_queue(args=""):
             timeout=15
         )
 
-def handle_approve(draft_id: int, variant: int):
+def execute_approval(draft_id: int, variant: int):
+    """Выполняет реальную публикацию утвержденного черновика."""
     from drafts import get_pending_drafts, approve_draft
     drafts = [d for d in get_pending_drafts() if d['id'] == draft_id]
     if not drafts:
-        send_msg(f"⚠️ Черновик #{draft_id} уже обработан или не найден.")
+        send_msg(f"⚠️ Черновик #{draft_id} уже опубликован или не найден.")
         return
         
     d = drafts[0]
+    send_msg(f"🚀 <b>Черновик #{draft_id} (Вариант {variant}) утверждён!</b> Отправляю публикацию в канал...")
     approve_draft(draft_id, variant)
+    
     if d['type'] == 'post':
         from news import publish_approved_news
-        publish_approved_news(d['payload'], variant)
+        res = publish_approved_news(d['payload'], variant)
+        send_msg(f"📢 <b>Результат публикации:</b>\n{res}")
     else:
         from publisher import publish_approved_post
-        publish_approved_post(target="", text=d['payload'])
-        send_msg(f"✅ Черновик #{draft_id} утверждён.")
+        res = publish_approved_post(target="", text=d['payload'])
+        send_msg(f"📢 <b>Результат:</b>\n{res}")
 
-def handle_reject(draft_id: int):
+def execute_rejection(draft_id: int):
     if reject_draft(draft_id):
-        send_msg(f"🗑 <b>Черновик #{draft_id} отклонён.</b>")
+        send_msg(f"🗑 <b>Черновик #{draft_id} успешно отклонён.</b>")
     else:
         send_msg(f"⚠️ Черновик #{draft_id} не найден.")
+
+def handle_say(args=""):
+    parts = args.split(maxsplit=2)
+    if len(parts) < 3:
+        send_msg("⚠️ Использование: <code>/say &lt;юзернейм/ID&gt; &lt;текст&gt;</code>")
+        return
+    send_msg(f"📨 Сообщение в очереди для <b>{parts[1]}</b>:\n«{parts[2]}»")
+
+COMMANDS = {
+    "/status": handle_status,
+    "/queue": handle_queue,
+    "/say": handle_say,
+    "/doctor": handle_doctor,
+    "/models": handle_models,
+    "/errors": handle_errors,
+    "/testimg": handle_testimg
+}
 
 def process_pager_updates():
     if not TG_BOT_TOKEN: return
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates"
     try:
-        # Явно запрашиваем и сообщения, и нажатия на кнопки
         res = requests.get(url, params={"timeout": 3, "allowed_updates": ["message", "callback_query"]}, timeout=6).json()
         for u in res.get("result", []):
             update_id = u["update_id"]
             requests.get(url, params={"offset": update_id + 1, "timeout": 0}, timeout=4)
             
-            # Нажатие на инлайн-кнопку
+            # 1. Нажатие на кнопку
             if "callback_query" in u:
                 cb = u["callback_query"]
-                sender_id = str(cb.get("from", {}).get("id", ""))
-                if sender_id != str(ADMIN_CHAT_ID):
+                if str(cb.get("from", {}).get("id", "")) != str(ADMIN_CHAT_ID):
                     continue
                 
                 data = cb.get("data", "")
-                # Моментальный всплывающий ответ пользователю
                 requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/answerCallbackQuery", json={
                     "callback_query_id": cb["id"],
-                    "text": "🚀 Вариант принят! Запускаю публикацию..."
+                    "text": "🚀 Принято! Запускаю публикацию..."
                 })
                 
                 if data.startswith("app_"):
                     _, d_id, v_idx = data.split("_")
-                    handle_approve(int(d_id), int(v_idx))
+                    execute_approval(int(d_id), int(v_idx))
                 elif data.startswith("rej_"):
                     _, d_id = data.split("_")
-                    handle_reject(int(d_id))
+                    execute_rejection(int(d_id))
                 continue
 
-            # Текстовые команды
+            # 2. Текстовые команды
             m = u.get("message", {})
+            if str(m.get("chat", {}).get("id", "")) != str(ADMIN_CHAT_ID):
+                continue
+            
             text = m.get("text", "").strip()
             cmd = text.split()[0] if text else ""
+            
             if cmd == "/approve":
                 p = text.split()
-                if len(p) >= 2: handle_approve(int(p[1]), int(p[2]) if len(p) > 2 else 1)
+                if len(p) >= 2:
+                    execute_approval(int(p[1]), int(p[2]) if len(p) > 2 else 1)
             elif cmd == "/reject":
                 p = text.split()
-                if len(p) >= 2: handle_reject(int(p[1]))
-            elif cmd == "/testimg": handle_testimg()
-            elif cmd == "/models": handle_models()
-            elif cmd == "/doctor": handle_doctor()
-            elif cmd == "/errors": handle_errors()
-            elif cmd == "/queue": handle_queue()
-            elif cmd == "/status": handle_status()
+                if len(p) >= 2:
+                    execute_rejection(int(p[1]))
+            elif cmd in COMMANDS:
+                COMMANDS[cmd](text)
     except Exception as e:
         print(f"Ошибка updates: {e}")
