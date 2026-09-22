@@ -17,7 +17,35 @@ def send_msg(text: str, reply_markup=None):
     notify(text, html=True)
 
 def handle_status(args=""):
-    send_msg("🟢 <b>Агент активен:</b> Все системы функционируют в штатном режиме.")
+    send_msg("🟢 <b>Агент активен:</b> Все контуры функционируют штатно.")
+
+def handle_export(args=""):
+    """Выгружает все значения секретов прямо вам в Telegram для переноса в Hugging Face."""
+    secret_keys = [
+        "TG_BOT_TOKEN",
+        "ADMIN_CHAT_ID",
+        "GEMINI_API_KEY",
+        "GEMINI_BACKUP_KEYS",
+        "OPENROUTER_API_KEY",
+        "TG_API_ID",
+        "TG_API_HASH",
+        "TG_STRING_SESSION",
+        "VK_TOKEN",
+        "VK_GROUP_TOKEN",
+        "FB_API_KEY",
+        "FB_SECRET_KEY",
+        "MODEL_GEMINI",
+        "MODEL_OPENROUTER",
+        "VK_ENABLED"
+    ]
+    
+    send_msg("🔐 <i>Выгружаю секреты из защищённого хранилища GitHub...</i>")
+    
+    for key in secret_keys:
+        val = os.getenv(key, "").strip()
+        if val:
+            # Отправляем каждый секрет в отдельном сообщении с тегом <code> для быстрого копирования в 1 клик
+            send_msg(f"📌 <b>{key}</b>:\n<code>{val}</code>")
 
 def handle_models(args=""):
     from modelcatalog import list_google, list_openrouter
@@ -78,8 +106,8 @@ def handle_queue(args=""):
 
         inline_keyboard = [
             [
-                {"text": f"🔥 Одобрить Вариант 1", "callback_data": f"app_{d['id']}_1"},
-                {"text": f"💡 Одобрить Вариант 2", "callback_data": f"app_{d['id']}_2"}
+                {"text": "🔥 Одобрить Вариант 1", "callback_data": f"app_{d['id']}_1"},
+                {"text": "💡 Одобрить Вариант 2", "callback_data": f"app_{d['id']}_2"}
             ],
             [
                 {"text": "🗑 Отклонить черновик", "callback_data": f"rej_{d['id']}"}
@@ -93,7 +121,6 @@ def handle_queue(args=""):
         )
 
 def execute_approval(draft_id: int, variant: int):
-    """Выполняет реальную публикацию утвержденного черновика."""
     from drafts import get_pending_drafts, approve_draft
     drafts = [d for d in get_pending_drafts() if d['id'] == draft_id]
     if not drafts:
@@ -113,9 +140,9 @@ def execute_approval(draft_id: int, variant: int):
         res = publish_approved_post(target="", text=d['payload'])
         send_msg(f"📢 <b>Результат:</b>\n{res}")
 
-def execute_rejection(draft_id: int):
+def handle_reject(draft_id: int):
     if reject_draft(draft_id):
-        send_msg(f"🗑 <b>Черновик #{draft_id} успешно отклонён.</b>")
+        send_msg(f"🗑 <b>Черновик #{draft_id} отклонён.</b>")
     else:
         send_msg(f"⚠️ Черновик #{draft_id} не найден.")
 
@@ -133,7 +160,8 @@ COMMANDS = {
     "/doctor": handle_doctor,
     "/models": handle_models,
     "/errors": handle_errors,
-    "/testimg": handle_testimg
+    "/testimg": handle_testimg,
+    "/export": handle_export
 }
 
 def process_pager_updates():
@@ -162,7 +190,7 @@ def process_pager_updates():
                     execute_approval(int(d_id), int(v_idx))
                 elif data.startswith("rej_"):
                     _, d_id = data.split("_")
-                    execute_rejection(int(d_id))
+                    handle_reject(int(d_id))
                 continue
 
             # 2. Текстовые команды
@@ -180,7 +208,7 @@ def process_pager_updates():
             elif cmd == "/reject":
                 p = text.split()
                 if len(p) >= 2:
-                    execute_rejection(int(p[1]))
+                    handle_reject(int(p[1]))
             elif cmd in COMMANDS:
                 COMMANDS[cmd](text)
     except Exception as e:
