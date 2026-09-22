@@ -30,7 +30,8 @@ VK_ENABLED = os.getenv("VK_ENABLED", "false").lower() == "true"
 SPACES = [
     "opion2008/cupidon",
     "opion2008/criminal-bot",
-    "opion2008/rslaw-bot"
+    "opion2008/rslaw-bot",
+    "opion2008/cupid-agent"
 ]
 
 def send_telegram_report(message: str):
