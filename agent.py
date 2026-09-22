@@ -16,7 +16,6 @@ from tg_userbot import run_cupidon_live_test
 from notifier import notify
 import vkrate
 
-# Безопасный импорт модерации
 try:
     from moderator import run_moderation_check
 except Exception:
@@ -42,21 +41,21 @@ def run_keepalive_check() -> list[str]:
     hf_api = HfApi(token=hf_token) if hf_token else None
     results = []
 
+    headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+
     for space in SPACES:
         subdomain = space.replace("/", "-")
         ping_url = f"https://{subdomain}.hf.space/ping"
         try:
-            res = requests.get(ping_url, timeout=10)
-            if res.status_code == 200:
+            res = requests.get(ping_url, headers=headers, timeout=10)
+            if res.status_code in [200, 302]:
                 results.append(f"• <b>{space}</b>: ✅ Работает (200 OK)")
             else:
-                if hf_api:
-                    hf_api.restart_space(repo_id=space)
+                if hf_api: hf_api.restart_space(repo_id=space)
                 results.append(f"• <b>{space}</b>: ⚠️ Код {res.status_code} ➔ Перезапущен")
         except Exception:
             try:
-                if hf_api:
-                    hf_api.restart_space(repo_id=space)
+                if hf_api: hf_api.restart_space(repo_id=space)
                 results.append(f"• <b>{space}</b>: 🚨 Спал ➔ Принудительно разбужен")
             except Exception as err:
                 results.append(f"• <b>{space}</b>: ❌ Ошибка ({err})")
@@ -80,41 +79,38 @@ async def test_telegram_userbot() -> tuple[str, str]:
         me = await client.get_me()
         user_info = f"@{me.username}" if me.username else me.first_name
         live_test_res = await run_cupidon_live_test(client)
+        # Очищаем от Markdown-звездочек и подчеркиваний
+        clean_live_test = live_test_res.replace("**", "").replace("__", "")
         await client.disconnect()
-        return f"✅ Подключен: {user_info} (ID: {me.id})", live_test_res
+        return f"✅ Подключен: {user_info} (ID: {me.id})", clean_live_test
     except Exception as e:
         return f"❌ Сбой TG Userbot: {e}", "Ошибка"
 
 def test_vk_userbot() -> str:
     if not VK_ENABLED:
         return "⏸️ ВК на паузе (VK_ENABLED=false)"
-        
     vk_token = os.getenv("VK_TOKEN")
     if not vk_token:
         return "⚠️ Не задан VK_TOKEN"
-
     try:
         session = vkrate.get_vk_session(vk_token)
         user = vkrate.vk_call(session, "users.get")[0]
         return f"✅ Подключен: {user['first_name']} {user['last_name']} (id{user['id']})"
     except Exception as e:
-        err = str(e)
-        if "[9]" in err or "Flood control" in err:
-            return "⚠️ ВК ожидает паузы ([9] Flood control)"
-        return f"❌ {err[:70]}"
+        return "⚠️ ВК ожидает паузы ([9] Flood control)"
 
 def generate_trending_ai_feature() -> str:
-    """Генерирует свежую виральную фичу для бота Купидон через Gemini 3.8."""
+    """Генерирует свежую хайповую фичу строго на русском языке."""
     prompt = (
-        "Сгенерируй одну ультра-хайповую, трендовую AI-фичу для Telegram-бота дейтинга 'ИИ-Купидон' "
-        "(на базе Telegram Mini Apps, видео-кружочков, голосовых сообщений или мультимодального анализа). "
-        "Выведи строго в формате:\n"
-        "<b>Название фичи:</b> ...\n\n"
-        "<b>Суть и виральный эффект:</b> ... (2 коротких, цепляющих абзаца без лишней воды)."
+        "Сгенерируй одну ультра-хайповую, трендовую AI-фичу для Telegram-бота знакомств 'ИИ-Купидон' "
+        "(на базе Telegram Mini Apps, видео-кружочков, голосовых сообщений или дуэлей харизмы). "
+        "ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ! Запрещено выводить текст на английском! "
+        "Формат вывода строго:\n"
+        "<b>Название фичи:</b> [название]\n\n"
+        "<b>Суть и виральный эффект:</b> [2 коротких, ярких, захватывающих абзаца]."
     )
-    feature, _ = ask_llm(prompt, system_prompt="Ты — креативный CPO и продуктолог дейтинг-сервисов.", temperature=0.9)
-    # Очищаем от возможных звездочек
-    clean_feature = feature.replace("**", "")
+    feature, _ = ask_llm(prompt, system_prompt="Ты — креативный CPO дейтинг-стартапов. Пиши сочно и строго по-русски.", temperature=0.88)
+    clean_feature = feature.replace("**", "").replace("<br>", "\n")
     return clean_feature
 
 def test_ai_qa_reasoning() -> str:
@@ -128,7 +124,7 @@ async def main():
     init_db()
     
     try:
-        # 1. Генерация поста с ротацией тем (если очередь пуста)
+        # 1. Свежий пост «на приколе»
         if not get_pending_drafts():
             try:
                 from news import pick_fresh_topic, generate_post_variants
@@ -145,10 +141,10 @@ async def main():
         # 2. Обработка команд и мгновенный отклик кнопок
         process_pager_updates()
         
-        # 3. Проверка серверов Hugging Face (Антисон)
+        # 3. Антисон спейсов (с поддержкой авторизации для приватных спейсов)
         servers_status = run_keepalive_check()
         
-        # 4. Тест Userbot и отправка сообщения боту Купидон
+        # 4. Живой тест TG Userbot (с очисткой от звездочек)
         tg_status, live_cupid_test = await test_telegram_userbot()
         
         # 5. Проверка ВК
@@ -157,13 +153,12 @@ async def main():
         # 6. Тестирование ИИ-мозга
         ai_status = test_ai_qa_reasoning()
 
-        # 7. Генерация трендового апгрейда (Хайповая фича)
+        # 7. Генерация трендового апгрейда на русском
         trending_feature = generate_trending_ai_feature()
 
         # 8. Модерация спама
         mod_results = run_moderation_check()
 
-        # Красивый отчет в стиле скриншота 4
         report = (
             "🤖 <b>[ОТЧЕТ ИИ-АГЕНТА: ЭКОСИСТЕМА 3 БОТОВ & GEMINI 3.8]</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
