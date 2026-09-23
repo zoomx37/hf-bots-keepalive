@@ -41,24 +41,43 @@ def run_keepalive_check() -> list[str]:
     hf_api = HfApi(token=hf_token) if hf_token else None
     results = []
 
-    headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
-
     for space in SPACES:
-        subdomain = space.replace("/", "-")
-        ping_url = f"https://{subdomain}.hf.space/ping"
-        try:
-            res = requests.get(ping_url, headers=headers, timeout=10)
-            if res.status_code in [200, 302]:
-                results.append(f"• <b>{space}</b>: ✅ Работает (200 OK)")
-            else:
-                if hf_api: hf_api.restart_space(repo_id=space)
-                results.append(f"• <b>{space}</b>: ⚠️ Код {res.status_code} ➔ Перезапущен")
-        except Exception:
+        is_ok = False
+        stage_info = "Неизвестно"
+        
+        # 1. Проверяем напрямую через официальный Hugging Face API (работает и для Private спейсов!)
+        if hf_api:
             try:
-                if hf_api: hf_api.restart_space(repo_id=space)
-                results.append(f"• <b>{space}</b>: 🚨 Спал ➔ Принудительно разбужен")
-            except Exception as err:
-                results.append(f"• <b>{space}</b>: ❌ Ошибка ({err})")
+                runtime = hf_api.get_space_runtime(repo_id=space)
+                stage_info = runtime.stage
+                if stage_info in ["RUNNING", "APP_STARTING"]:
+                    is_ok = True
+                elif stage_info in ["SLEEPING", "PAUSED"]:
+                    hf_api.restart_space(repo_id=space)
+                    results.append(f"• <b>{space}</b>: 🚨 Спал ({stage_info}) ➔ Разбужен")
+                    continue
+            except Exception:
+                pass
+
+        # 2. Сетевой пинг
+        if not is_ok:
+            subdomain = space.replace("/", "-")
+            headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+            try:
+                res = requests.get(f"https://{subdomain}.hf.space/ping", headers=headers, timeout=8)
+                if res.status_code in [200, 302]:
+                    is_ok = True
+            except Exception:
+                pass
+
+        if is_ok:
+            results.append(f"• <b>{space}</b>: ✅ Работает ({stage_info if stage_info != 'Неизвестно' else '200 OK'})")
+        else:
+            if hf_api:
+                try: hf_api.restart_space(repo_id=space)
+                except: pass
+            results.append(f"• <b>{space}</b>: ⚠️ Код ({stage_info}) ➔ Перезапущен")
+
     return results
 
 async def test_telegram_userbot() -> tuple[str, str]:
@@ -79,7 +98,6 @@ async def test_telegram_userbot() -> tuple[str, str]:
         me = await client.get_me()
         user_info = f"@{me.username}" if me.username else me.first_name
         live_test_res = await run_cupidon_live_test(client)
-        # Очищаем от Markdown-звездочек и подчеркиваний
         clean_live_test = live_test_res.replace("**", "").replace("__", "")
         await client.disconnect()
         return f"✅ Подключен: {user_info} (ID: {me.id})", clean_live_test
@@ -96,11 +114,10 @@ def test_vk_userbot() -> str:
         session = vkrate.get_vk_session(vk_token)
         user = vkrate.vk_call(session, "users.get")[0]
         return f"✅ Подключен: {user['first_name']} {user['last_name']} (id{user['id']})"
-    except Exception as e:
+    except Exception:
         return "⚠️ ВК ожидает паузы ([9] Flood control)"
 
 def generate_trending_ai_feature() -> str:
-    """Генерирует свежую хайповую фичу строго на русском языке."""
     prompt = (
         "Сгенерируй одну ультра-хайповую, трендовую AI-фичу для Telegram-бота знакомств 'ИИ-Купидон' "
         "(на базе Telegram Mini Apps, видео-кружочков, голосовых сообщений или дуэлей харизмы). "
@@ -124,7 +141,6 @@ async def main():
     init_db()
     
     try:
-        # 1. Свежий пост «на приколе»
         if not get_pending_drafts():
             try:
                 from news import pick_fresh_topic, generate_post_variants
@@ -136,27 +152,14 @@ async def main():
                     payload=f"@qpd_n|||{v1}|||{v2}"
                 )
             except Exception as e:
-                log.warning(f"Ошибка генератора тем: {e}")
+                log.warning(f"Ошибка тем: {e}")
 
-        # 2. Обработка команд и мгновенный отклик кнопок
         process_pager_updates()
-        
-        # 3. Антисон спейсов (с поддержкой авторизации для приватных спейсов)
         servers_status = run_keepalive_check()
-        
-        # 4. Живой тест TG Userbot (с очисткой от звездочек)
         tg_status, live_cupid_test = await test_telegram_userbot()
-        
-        # 5. Проверка ВК
         vk_status = test_vk_userbot()
-        
-        # 6. Тестирование ИИ-мозга
         ai_status = test_ai_qa_reasoning()
-
-        # 7. Генерация трендового апгрейда на русском
         trending_feature = generate_trending_ai_feature()
-
-        # 8. Модерация спама
         mod_results = run_moderation_check()
 
         report = (
@@ -173,7 +176,7 @@ async def main():
             f"🌐 <b>3. ВКонтакте Userbot:</b> {vk_status}\n\n"
             f"🧠 <b>4. ИИ-Мозг (QA-Тест):</b>\n{ai_status}\n\n"
             f"🛡 <b>5. Модерация спама:</b>\n" + "\n".join(mod_results) + "\n\n"
-            "💡 <i>Команды: /queue (кнопки), /testimg (тест фото), /models, /doctor, /errors</i>"
+            "💡 <i>Отправьте /menu для открытия интерактивного пульта!</i>"
         )
 
         send_telegram_report(report)
