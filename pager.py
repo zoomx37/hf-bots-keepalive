@@ -17,35 +17,7 @@ def send_msg(text: str, reply_markup=None):
     notify(text, html=True)
 
 def handle_status(args=""):
-    send_msg("🟢 <b>Агент активен:</b> Все контуры функционируют штатно.")
-
-def handle_export(args=""):
-    """Выгружает все значения секретов прямо вам в Telegram для переноса в Hugging Face."""
-    secret_keys = [
-        "TG_BOT_TOKEN",
-        "ADMIN_CHAT_ID",
-        "GEMINI_API_KEY",
-        "GEMINI_BACKUP_KEYS",
-        "OPENROUTER_API_KEY",
-        "TG_API_ID",
-        "TG_API_HASH",
-        "TG_STRING_SESSION",
-        "VK_TOKEN",
-        "VK_GROUP_TOKEN",
-        "FB_API_KEY",
-        "FB_SECRET_KEY",
-        "MODEL_GEMINI",
-        "MODEL_OPENROUTER",
-        "VK_ENABLED"
-    ]
-    
-    send_msg("🔐 <i>Выгружаю секреты из защищённого хранилища GitHub...</i>")
-    
-    for key in secret_keys:
-        val = os.getenv(key, "").strip()
-        if val:
-            # Отправляем каждый секрет в отдельном сообщении с тегом <code> для быстрого копирования в 1 клик
-            send_msg(f"📌 <b>{key}</b>:\n<code>{val}</code>")
+    send_msg("🟢 <b>Агент активен:</b> Все контуры (Пульт 24/7, Мониторинг, Тренды, Соц-модуль) в строю.")
 
 def handle_models(args=""):
     from modelcatalog import list_google, list_openrouter
@@ -61,18 +33,106 @@ def handle_models(args=""):
     or_models = list_openrouter()
     out.append("\n🔹 <b>OpenRouter (бесплатные :free):</b>")
     if or_models:
-        for m in or_models[:5]: out.append(f"  • <code>{m}</code>")
+        for m in or_models[:6]: out.append(f"  • <code>{m}</code>")
     send_msg("\n".join(out))
 
+def handle_trends(args=""):
+    send_msg("🔥 <i>Сканирую тренды дейтинга, соцсети и новости глянца...</i>")
+    try:
+        from trends import fetch_rss_trends, get_hot_trends
+        fetch_rss_trends()
+        hot = get_hot_trends(6)
+        if not hot:
+            send_msg("📭 Новых трендов пока не обнаружено.")
+            return
+        out = ["🔥 <b>[ГОРЯЧИЕ ИНФОПОВОДЫ И ТРЕНДЫ СЕЙЧАС]</b>\n"]
+        for tid, src, title, heat, url in hot:
+            out.append(f"🔹 <b>#{tid}</b> [{src.upper()}] <i>(Хайп-балл: {heat:.1f})</i>\n«{title}»\n👉 Сделать пост: <code>/pitch {tid}</code>\n")
+        send_msg("\n".join(out))
+    except Exception as e:
+        send_msg(f"❌ Ошибка трендов: {e}")
+
+def handle_pitch(args=""):
+    parts = args.split()
+    if len(parts) < 2:
+        send_msg("⚠️ Использование: <code>/pitch &lt;ID_тренда&gt;</code>")
+        return
+    try:
+        tid = int(parts[1])
+        from trends import pitch_trend_to_post
+        from drafts import add_draft
+        v1, v2 = pitch_trend_to_post(tid)
+        if v1 and v2:
+            did = add_draft("post", f"@qpd_n|||{v1}|||{v2}", target="@qpd_n")
+            send_msg(f"✅ На основе тренда #{tid} создан <b>Черновик поста #{did}</b>! Отправьте /queue для просмотра.")
+        else:
+            send_msg(f"⚠️ Тренд #{tid} не найден.")
+    except Exception as e:
+        send_msg(f"❌ Сбой питча: {e}")
+
+def handle_find(args=""):
+    # Пример: /find Москва 20-28 ж
+    parts = args.split()
+    if len(parts) < 4:
+        send_msg("⚠️ Использование: <code>/find &lt;Город&gt; &lt;Возраст&gt; &lt;Пол: м/ж&gt;</code>\nПример: <code>/find Москва 20-27 ж</code>")
+        return
+    city, age_range, sex = parts[1], parts[2], parts[3]
+    try:
+        a_from, a_to = map(int, age_range.split("-"))
+        send_msg(f"🔎 <i>Ищу открытые анкеты ВК в г. {city} ({a_from}–{a_to} лет)...</i>")
+        from social import search_vk_candidates
+        users = search_vk_candidates(city, a_from, a_to, sex)
+        if not users:
+            send_msg("📭 Кандидатов с открытой личкой не найдено.")
+            return
+        out = [f"👥 <b>[КАНДИДАТЫ ДЛЯ ЗНАКОМСТВА: {city}]</b>\n"]
+        for idx, u in enumerate(users[:6], 1):
+            name = f"{u.get('first_name')} {u.get('last_name')}"
+            uid = u.get("id")
+            about = u.get("interests") or u.get("about") or "без описания"
+            out.append(f"<b>{idx}. {name}</b> (id{uid})\n<i>Интересы: {about[:70]}...</i>\n👉 Начать диалог: <code>/pick {uid} Познакомиться легко, позвать на кофе</code>\n")
+        send_msg("\n".join(out))
+    except Exception as e:
+        send_msg(f"❌ Ошибка поиска: {e}")
+
+def handle_pick(args=""):
+    parts = args.split(maxsplit=2)
+    if len(parts) < 3:
+        send_msg("⚠️ Использование: <code>/pick &lt;VK_ID&gt; &lt;Цель/Задание&gt;</code>")
+        return
+    uid, task = parts[1], parts[2]
+    try:
+        from social import pick_candidate_task
+        pick_candidate_task(uid, "vk", task)
+        send_msg(f"💌 <b>Кандидат id{uid} взят в работу!</b>\nЗадача: «{task}».\n<i>Агент начнет общение с юмором и без самораскрытия бота. При вопросах о боте — сразу уведомит вас!</i>")
+    except Exception as e:
+        send_msg(f"❌ Ошибка: {e}")
+
+def handle_audit(args=""):
+    send_msg("📊 <i>Собираю статистику каналов и формирую аудит...</i>")
+    try:
+        from promo import run_marketing_audit
+        run_marketing_audit()
+    except Exception as e:
+        send_msg(f"❌ Ошибка аудита: {e}")
+
+def handle_plan7(args=""):
+    send_msg("🗓 <i>Генерирую контент-план на 7 дней в стиле 'НА ПРИКОЛЕ'...</i>")
+    try:
+        from promo import generate_7day_content_plan
+        generate_7day_content_plan()
+    except Exception as e:
+        send_msg(f"❌ Ошибка плана: {e}")
+
 def handle_testimg(args=""):
-    send_msg("🎨 <i>Генерирую тестовую иллюстрацию без вотермарки...</i>")
+    send_msg("🎨 <i>Генерирую тестовую иллюстрацию БЕЗ людей и вотермарки...</i>")
     from imagegen import generate_image
     from notifier import PAGER_TOKEN, CHAT_ID
-    photo = generate_image("пара в уютном кафе пьет кофе, теплый свет, романтичная плоская иллюстрация")
+    photo = generate_image("уютный вечерний столик у окна кофейни, чашки горячего кофе, теплый кинематографичный свет, неоновая вывеска сердца")
     if photo:
         requests.post(
             f"https://api.telegram.org/bot{PAGER_TOKEN}/sendPhoto",
-            data={"chat_id": CHAT_ID, "caption": "🎨 <b>Тест генератора картинок успешен (без вотермарки)!</b>", "parse_mode": "HTML"},
+            data={"chat_id": CHAT_ID, "caption": "🎨 <b>Тест генератора: без людей и без вотермарки!</b>", "parse_mode": "HTML"},
             files={"photo": ("test.jpg", io.BytesIO(photo), "image/jpeg")}, timeout=35
         )
     else:
@@ -128,9 +188,8 @@ def execute_approval(draft_id: int, variant: int):
         return
         
     d = drafts[0]
-    send_msg(f"🚀 <b>Черновик #{draft_id} (Вариант {variant}) утверждён!</b> Отправляю публикацию в канал...")
+    send_msg(f"🚀 <b>Черновик #{draft_id} (Вариант {variant}) утверждён!</b> Публикую...")
     approve_draft(draft_id, variant)
-    
     if d['type'] == 'post':
         from news import publish_approved_news
         res = publish_approved_news(d['payload'], variant)
@@ -140,7 +199,7 @@ def execute_approval(draft_id: int, variant: int):
         res = publish_approved_post(target="", text=d['payload'])
         send_msg(f"📢 <b>Результат:</b>\n{res}")
 
-def handle_reject(draft_id: int):
+def execute_rejection(draft_id: int):
     if reject_draft(draft_id):
         send_msg(f"🗑 <b>Черновик #{draft_id} отклонён.</b>")
     else:
@@ -161,7 +220,12 @@ COMMANDS = {
     "/models": handle_models,
     "/errors": handle_errors,
     "/testimg": handle_testimg,
-    "/export": handle_export
+    "/trends": handle_trends,
+    "/pitch": handle_pitch,
+    "/find": handle_find,
+    "/pick": handle_pick,
+    "/audit": handle_audit,
+    "/plan7": handle_plan7
 }
 
 def process_pager_updates():
@@ -173,42 +237,34 @@ def process_pager_updates():
             update_id = u["update_id"]
             requests.get(url, params={"offset": update_id + 1, "timeout": 0}, timeout=4)
             
-            # 1. Нажатие на кнопку
             if "callback_query" in u:
                 cb = u["callback_query"]
                 if str(cb.get("from", {}).get("id", "")) != str(ADMIN_CHAT_ID):
                     continue
-                
                 data = cb.get("data", "")
                 requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/answerCallbackQuery", json={
                     "callback_query_id": cb["id"],
                     "text": "🚀 Принято! Запускаю публикацию..."
                 })
-                
                 if data.startswith("app_"):
                     _, d_id, v_idx = data.split("_")
                     execute_approval(int(d_id), int(v_idx))
                 elif data.startswith("rej_"):
                     _, d_id = data.split("_")
-                    handle_reject(int(d_id))
+                    execute_rejection(int(d_id))
                 continue
 
-            # 2. Текстовые команды
             m = u.get("message", {})
             if str(m.get("chat", {}).get("id", "")) != str(ADMIN_CHAT_ID):
                 continue
-            
             text = m.get("text", "").strip()
             cmd = text.split()[0] if text else ""
-            
             if cmd == "/approve":
                 p = text.split()
-                if len(p) >= 2:
-                    execute_approval(int(p[1]), int(p[2]) if len(p) > 2 else 1)
+                if len(p) >= 2: execute_approval(int(p[1]), int(p[2]) if len(p) > 2 else 1)
             elif cmd == "/reject":
                 p = text.split()
-                if len(p) >= 2:
-                    handle_reject(int(p[1]))
+                if len(p) >= 2: execute_rejection(int(p[1]))
             elif cmd in COMMANDS:
                 COMMANDS[cmd](text)
     except Exception as e:
