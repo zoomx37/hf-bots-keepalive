@@ -5,7 +5,8 @@ import requests
 import vk_api
 
 TG_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", os.getenv("TG_BOT_TOKEN", ""))
-VK_TOKEN = os.getenv("VK_GROUP_TOKEN", os.getenv("VK_TOKEN", ""))
+# Строго токен сообщества! Личный токен пользователя исключен во избежание публикаций в личные истории
+VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN", "").strip()
 
 def clean_for_vk(text: str) -> str:
     """Полностью удаляет HTML-теги для стены ВКонтакте."""
@@ -35,12 +36,12 @@ def post_to_telegram(channel_target: str, text: str) -> tuple[bool, str]:
         return False, str(e)
 
 def post_to_vk(owner_id, text: str) -> tuple[bool, str]:
-    if not VK_TOKEN: return False, "Токен ВК не задан"
+    if not VK_GROUP_TOKEN: 
+        return False, "VK_GROUP_TOKEN не задан (публикация отменена для защиты личной страницы)"
     try:
         target_id = -239533580
-        vk_session = vk_api.VkApi(token=VK_TOKEN, api_version="5.131")
+        vk_session = vk_api.VkApi(token=VK_GROUP_TOKEN, api_version="5.131")
         vk = vk_session.get_api()
-        # Чистим текст от HTML-тегов перед публикацией в ВК
         clean_text = clean_for_vk(text)
         res = vk.wall.post(owner_id=target_id, from_group=1, message=clean_text)
         return True, f"post_id: {res.get('post_id')}"
