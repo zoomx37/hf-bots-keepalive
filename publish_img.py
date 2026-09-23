@@ -10,7 +10,6 @@ def tg_post_photo(target: str, caption: str, photo_bytes: bytes) -> bool:
     token = os.getenv("ADMIN_BOT_TOKEN", os.getenv("TG_BOT_TOKEN", ""))
     if not token: return False
     
-    # Лимит подписи к фото в Telegram — 1024 символа
     if len(caption) <= 1024:
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendPhoto",
@@ -20,7 +19,6 @@ def tg_post_photo(target: str, caption: str, photo_bytes: bytes) -> bool:
         ).json()
         return bool(r.get("ok"))
     else:
-        # Если текст длиннее 1024 символов — шлем фото + текст отдельным сообщением
         requests.post(
             f"https://api.telegram.org/bot{token}/sendPhoto",
             data={"chat_id": target},
@@ -35,14 +33,18 @@ def tg_post_photo(target: str, caption: str, photo_bytes: bytes) -> bool:
         return bool(r.get("ok"))
 
 def vk_post_photo(owner_id: int, text: str, photo_bytes: bytes) -> bool:
-    token = os.getenv("VK_GROUP_TOKEN", os.getenv("VK_TOKEN", ""))
-    if not token: return False
+    # Исключительно токен сообщества!
+    token = os.getenv("VK_GROUP_TOKEN", "").strip()
+    if not token: 
+        log.warning("VK_GROUP_TOKEN не задан — фото-пост отменён для защиты личной страницы")
+        return False
+        
     try:
         vk_session = vk_api.VkApi(token=token, api_version="5.131")
         vk = vk_session.get_api()
         gid = abs(int(owner_id))
         
-        # 1. Получаем сервер загрузки обложки
+        # 1. Сервер загрузки для сообщества
         up = vk.photos.getWallUploadServer(group_id=gid)
         upl = requests.post(
             up["upload_url"],
@@ -50,12 +52,12 @@ def vk_post_photo(owner_id: int, text: str, photo_bytes: bytes) -> bool:
             timeout=30
         ).json()
         
-        # 2. Сохраняем фото
+        # 2. Сохраняем фото в альбом группы
         saved = vk.photos.saveWallPhoto(
             group_id=gid, photo=upl["photo"], server=upl["server"], hash=upl["hash"]
         )[0]
         
-        # 3. Публикуем пост с прикрепленным фото
+        # 3. Публикуем строго от лица сообщества (from_group=1)
         vk.wall.post(
             owner_id=owner_id,
             from_group=1,
