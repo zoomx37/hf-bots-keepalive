@@ -7,6 +7,14 @@ from drafts import get_pending_drafts, approve_draft, reject_draft
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
 
+# Память фильтров поиска кандидатов (пошаговый мастер)
+SEARCH_FILTERS = {
+    "sex": "ж",
+    "age": "20-26",
+    "city": "Москва",
+    "vibe": "спорт, юмор"
+}
+
 ERR_BUF = io.StringIO()
 _err_handler = logging.StreamHandler(ERR_BUF)
 _err_handler.setLevel(logging.WARNING)
@@ -16,8 +24,116 @@ def send_msg(text: str, reply_markup=None):
     from notifier import notify
     notify(text, html=True)
 
+# ==========================================
+# КЛАВИАТУРЫ И ПОДРАЗДЕЛЫ МЕНЮ
+# ==========================================
+
+def get_main_menu_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "📰 Управление каналом & Посты", "callback_data": "nav_posts"},
+                {"text": "👥 Поиск кандидатов ВК", "callback_data": "nav_social"}
+            ],
+            [
+                {"text": "📊 Маркетинг & Продвижение", "callback_data": "nav_promo"},
+                {"text": "🩺 Диагностика & Статус", "callback_data": "nav_tech"}
+            ],
+            [
+                {"text": "📋 Очередь черновиков", "callback_data": "menu_queue"},
+                {"text": "🔄 Обновить статус", "callback_data": "menu_status"}
+            ]
+        ]
+    }
+
+def get_posts_menu_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "📋 Очередь черновиков (/queue)", "callback_data": "menu_queue"},
+                {"text": "🔥 Горячие тренды дейтинга", "callback_data": "menu_trends"}
+            ],
+            [
+                {"text": "🗓 Контент-план на 7 дней", "callback_data": "menu_plan7"},
+                {"text": "🎨 Тест генератора картинок", "callback_data": "menu_testimg"}
+            ],
+            [
+                {"text": "🏠 В главное меню", "callback_data": "nav_main"}
+            ]
+        ]
+    }
+
+def get_social_menu_keyboard():
+    s = SEARCH_FILTERS
+    return {
+        "inline_keyboard": [
+            [
+                {"text": f"👤 Пол: {s['sex'].upper()}", "callback_data": "filter_toggle_sex"},
+                {"text": f"🎂 Возраст: {s['age']}", "callback_data": "filter_cycle_age"}
+            ],
+            [
+                {"text": f"📍 Город: {s['city']}", "callback_data": "filter_cycle_city"},
+                {"text": f"✨ Вайб: {s['vibe']}", "callback_data": "filter_cycle_vibe"}
+            ],
+            [
+                {"text": "🚀 НАЙТИ КАНДИДАТОВ ПО ФИЛЬТРАМ", "callback_data": "run_filter_search"}
+            ],
+            [
+                {"text": "🏠 В главное меню", "callback_data": "nav_main"}
+            ]
+        ]
+    }
+
+def get_promo_menu_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "📈 Экспертный аудит каналов", "callback_data": "menu_audit"},
+                {"text": "🗓 Контент-план на 7 дней", "callback_data": "menu_plan7"}
+            ],
+            [
+                {"text": "🏠 В главное меню", "callback_data": "nav_main"}
+            ]
+        ]
+    }
+
+def get_tech_menu_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "🩺 Самодиагностика систем", "callback_data": "menu_doctor"},
+                {"text": "📡 Каталог ИИ-моделей", "callback_data": "menu_models"}
+            ],
+            [
+                {"text": "📋 Последние ошибки в логе", "callback_data": "menu_errors"},
+                {"text": "🔄 Статус серверов", "callback_data": "menu_status"}
+            ],
+            [
+                {"text": "🏠 В главное меню", "callback_data": "nav_main"}
+            ]
+        ]
+    }
+
+def show_main_menu():
+    text = (
+        "✨━━━━━━━━━━━━━━━━━━✨\n"
+        "🎛 <b>ГЛАВНЫЙ ПУЛЬТ УПРАВЛЕНИЯ КУПИДОН</b>\n"
+        "✨━━━━━━━━━━━━━━━━━━✨\n\n"
+        "Выберите интересующий подраздел управления системой 👇"
+    )
+    from notifier import PAGER_TOKEN, CHAT_ID
+    requests.post(
+        f"https://api.telegram.org/bot{PAGER_TOKEN}/sendMessage",
+        json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "reply_markup": get_main_menu_keyboard()},
+        timeout=15
+    )
+
+# ==========================================
+# ОБРАБОТЧИКИ ДЕЙСТВИЙ
+# ==========================================
+
 def handle_status(args=""):
-    send_msg("🟢 <b>Агент активен:</b> Все контуры (Пульт 24/7, Мониторинг, Тренды, Соц-модуль) в строю.")
+    send_msg("🟢 <b>Агент активен:</b> Все контуры функционируют штатно.")
 
 def handle_models(args=""):
     from modelcatalog import list_google, list_openrouter
@@ -37,17 +153,17 @@ def handle_models(args=""):
     send_msg("\n".join(out))
 
 def handle_trends(args=""):
-    send_msg("🔥 <i>Сканирую тренды дейтинга, соцсети и новости глянца...</i>")
+    send_msg("🔥 <i>Сканирую тренды дейтинга и ленты новостей...</i>")
     try:
         from trends import fetch_rss_trends, get_hot_trends
         fetch_rss_trends()
-        hot = get_hot_trends(6)
+        hot = get_hot_trends(5)
         if not hot:
             send_msg("📭 Новых трендов пока не обнаружено.")
             return
-        out = ["🔥 <b>[ГОРЯЧИЕ ИНФОПОВОДЫ И ТРЕНДЫ СЕЙЧАС]</b>\n"]
+        out = ["🔥 <b>[ГОРЯЧИЕ ИНФОПОВОДЫ СЕЙЧАС]</b>\n"]
         for tid, src, title, heat, url in hot:
-            out.append(f"🔹 <b>#{tid}</b> [{src.upper()}] <i>(Хайп-балл: {heat:.1f})</i>\n«{title}»\n👉 Сделать пост: <code>/pitch {tid}</code>\n")
+            out.append(f"🔹 <b>#{tid}</b> [{src.upper()}] <i>(Хайп: {heat:.1f})</i>\n«{title}»\n👉 Пост: <code>/pitch {tid}</code>\n")
         send_msg("\n".join(out))
     except Exception as e:
         send_msg(f"❌ Ошибка трендов: {e}")
@@ -64,49 +180,11 @@ def handle_pitch(args=""):
         v1, v2 = pitch_trend_to_post(tid)
         if v1 and v2:
             did = add_draft("post", f"@qpd_n|||{v1}|||{v2}", target="@qpd_n")
-            send_msg(f"✅ На основе тренда #{tid} создан <b>Черновик поста #{did}</b>! Отправьте /queue для просмотра.")
+            send_msg(f"✅ На основе тренда создан <b>Черновик #{did}</b>! Откройте меню /queue для выбора.")
         else:
             send_msg(f"⚠️ Тренд #{tid} не найден.")
     except Exception as e:
         send_msg(f"❌ Сбой питча: {e}")
-
-def handle_find(args=""):
-    # Пример: /find Москва 20-28 ж
-    parts = args.split()
-    if len(parts) < 4:
-        send_msg("⚠️ Использование: <code>/find &lt;Город&gt; &lt;Возраст&gt; &lt;Пол: м/ж&gt;</code>\nПример: <code>/find Москва 20-27 ж</code>")
-        return
-    city, age_range, sex = parts[1], parts[2], parts[3]
-    try:
-        a_from, a_to = map(int, age_range.split("-"))
-        send_msg(f"🔎 <i>Ищу открытые анкеты ВК в г. {city} ({a_from}–{a_to} лет)...</i>")
-        from social import search_vk_candidates
-        users = search_vk_candidates(city, a_from, a_to, sex)
-        if not users:
-            send_msg("📭 Кандидатов с открытой личкой не найдено.")
-            return
-        out = [f"👥 <b>[КАНДИДАТЫ ДЛЯ ЗНАКОМСТВА: {city}]</b>\n"]
-        for idx, u in enumerate(users[:6], 1):
-            name = f"{u.get('first_name')} {u.get('last_name')}"
-            uid = u.get("id")
-            about = u.get("interests") or u.get("about") or "без описания"
-            out.append(f"<b>{idx}. {name}</b> (id{uid})\n<i>Интересы: {about[:70]}...</i>\n👉 Начать диалог: <code>/pick {uid} Познакомиться легко, позвать на кофе</code>\n")
-        send_msg("\n".join(out))
-    except Exception as e:
-        send_msg(f"❌ Ошибка поиска: {e}")
-
-def handle_pick(args=""):
-    parts = args.split(maxsplit=2)
-    if len(parts) < 3:
-        send_msg("⚠️ Использование: <code>/pick &lt;VK_ID&gt; &lt;Цель/Задание&gt;</code>")
-        return
-    uid, task = parts[1], parts[2]
-    try:
-        from social import pick_candidate_task
-        pick_candidate_task(uid, "vk", task)
-        send_msg(f"💌 <b>Кандидат id{uid} взят в работу!</b>\nЗадача: «{task}».\n<i>Агент начнет общение с юмором и без самораскрытия бота. При вопросах о боте — сразу уведомит вас!</i>")
-    except Exception as e:
-        send_msg(f"❌ Ошибка: {e}")
 
 def handle_audit(args=""):
     send_msg("📊 <i>Собираю статистику каналов и формирую аудит...</i>")
@@ -132,7 +210,7 @@ def handle_testimg(args=""):
     if photo:
         requests.post(
             f"https://api.telegram.org/bot{PAGER_TOKEN}/sendPhoto",
-            data={"chat_id": CHAT_ID, "caption": "🎨 <b>Тест генератора: без людей и без вотермарки!</b>", "parse_mode": "HTML"},
+            data={"chat_id": CHAT_ID, "caption": "🎨 <b>Тест генератора картинок: без людей и без вотермарки!</b>", "parse_mode": "HTML"},
             files={"photo": ("test.jpg", io.BytesIO(photo), "image/jpeg")}, timeout=35
         )
     else:
@@ -210,9 +288,11 @@ def handle_say(args=""):
     if len(parts) < 3:
         send_msg("⚠️ Использование: <code>/say &lt;юзернейм/ID&gt; &lt;текст&gt;</code>")
         return
-    send_msg(f"📨 Сообщение в очереди для <b>{parts[1]}</b>:\n«{parts[2]}»")
+    send_msg(f"📨 Сообщение поставлено в очередь для <b>{parts[1]}</b>:\n«{parts[2]}»")
 
 COMMANDS = {
+    "/start": lambda _: show_main_menu(),
+    "/menu": lambda _: show_main_menu(),
     "/status": handle_status,
     "/queue": handle_queue,
     "/say": handle_say,
@@ -222,8 +302,6 @@ COMMANDS = {
     "/testimg": handle_testimg,
     "/trends": handle_trends,
     "/pitch": handle_pitch,
-    "/find": handle_find,
-    "/pick": handle_pick,
     "/audit": handle_audit,
     "/plan7": handle_plan7
 }
@@ -237,16 +315,92 @@ def process_pager_updates():
             update_id = u["update_id"]
             requests.get(url, params={"offset": update_id + 1, "timeout": 0}, timeout=4)
             
+            # Нажатие на кнопку
             if "callback_query" in u:
                 cb = u["callback_query"]
                 if str(cb.get("from", {}).get("id", "")) != str(ADMIN_CHAT_ID):
                     continue
                 data = cb.get("data", "")
-                requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/answerCallbackQuery", json={
-                    "callback_query_id": cb["id"],
-                    "text": "🚀 Принято! Запускаю публикацию..."
-                })
-                if data.startswith("app_"):
+                requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
+                
+                # Навигация меню
+                if data == "nav_main":
+                    show_main_menu()
+                elif data == "nav_posts":
+                    from notifier import PAGER_TOKEN, CHAT_ID
+                    requests.post(f"https://api.telegram.org/bot{PAGER_TOKEN}/sendMessage", json={
+                        "chat_id": CHAT_ID, "text": "📰 <b>Раздел: Управление каналом & Посты</b>\nВыберите действие:", "parse_mode": "HTML", "reply_markup": get_posts_menu_keyboard()
+                    })
+                elif data == "nav_social":
+                    from notifier import PAGER_TOKEN, CHAT_ID
+                    s = SEARCH_FILTERS
+                    text = f"👥 <b>Поиск кандидатов ВК (Фильтры)</b>\n\nТекущие параметры:\n• Пол: <b>{s['sex'].upper()}</b>\n• Возраст: <b>{s['age']}</b>\n• Город: <b>{s['city']}</b>\n• Вайб: <b>{s['vibe']}</b>\n\nКликайте по кнопкам ниже для смены параметров или нажмите 'Найти':"
+                    requests.post(f"https://api.telegram.org/bot{PAGER_TOKEN}/sendMessage", json={
+                        "chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "reply_markup": get_social_menu_keyboard()
+                    })
+                elif data == "nav_promo":
+                    from notifier import PAGER_TOKEN, CHAT_ID
+                    requests.post(f"https://api.telegram.org/bot{PAGER_TOKEN}/sendMessage", json={
+                        "chat_id": CHAT_ID, "text": "📊 <b>Раздел: Маркетинг & Продвижение</b>\nВыберите действие:", "parse_mode": "HTML", "reply_markup": get_promo_menu_keyboard()
+                    })
+                elif data == "nav_tech":
+                    from notifier import PAGER_TOKEN, CHAT_ID
+                    requests.post(f"https://api.telegram.org/bot{PAGER_TOKEN}/sendMessage", json={
+                        "chat_id": CHAT_ID, "text": "🩺 <b>Раздел: Диагностика & Серверы</b>\nВыберите действие:", "parse_mode": "HTML", "reply_markup": get_tech_menu_keyboard()
+                    })
+                
+                # Переключение фильтров поиска в 1 клик
+                elif data == "filter_toggle_sex":
+                    SEARCH_FILTERS["sex"] = "м" if SEARCH_FILTERS["sex"] == "ж" else "ж"
+                    send_msg(f"👤 Пол изменен на: <b>{SEARCH_FILTERS['sex'].upper()}</b>")
+                elif data == "filter_cycle_age":
+                    ages = ["18-22", "23-27", "28-35", "35-45"]
+                    curr_idx = ages.index(SEARCH_FILTERS["age"]) if SEARCH_FILTERS["age"] in ages else 0
+                    SEARCH_FILTERS["age"] = ages[(curr_idx + 1) % len(ages)]
+                    send_msg(f"🎂 Возраст изменен на: <b>{SEARCH_FILTERS['age']}</b>")
+                elif data == "filter_cycle_city":
+                    cities = ["Москва", "Санкт-Петербург", "Новосибирск", "Екатеринбург", "Казань", "Краснодар"]
+                    curr_idx = cities.index(SEARCH_FILTERS["city"]) if SEARCH_FILTERS["city"] in cities else 0
+                    SEARCH_FILTERS["city"] = cities[(curr_idx + 1) % len(cities)]
+                    send_msg(f"📍 Город изменен на: <b>{SEARCH_FILTERS['city']}</b>")
+                elif data == "filter_cycle_vibe":
+                    vibes = ["спорт, юмор", "уют, книги, кофе", "вечеринки, музыка", "бизнес, карьера"]
+                    curr_idx = vibes.index(SEARCH_FILTERS["vibe"]) if SEARCH_FILTERS["vibe"] in vibes else 0
+                    SEARCH_FILTERS["vibe"] = vibes[(curr_idx + 1) % len(vibes)]
+                    send_msg(f"✨ Вайб изменен на: <b>{SEARCH_FILTERS['vibe']}</b>")
+                elif data == "run_filter_search":
+                    s = SEARCH_FILTERS
+                    a_from, a_to = map(int, s["age"].split("-"))
+                    send_msg(f"🔎 <i>Ищу анкеты: {s['city']}, {s['sex'].upper()}, {s['age']} лет, вайб '{s['vibe']}'...</i>")
+                    try:
+                        from social import search_vk_candidates
+                        users = search_vk_candidates(s["city"], a_from, a_to, s["sex"], s["vibe"])
+                        if not users:
+                            send_msg("📭 Кандидатов с открытой личкой по этим параметрам не найдено.")
+                        else:
+                            out = [f"👥 <b>[КАНДИДАТЫ ВК: {s['city']} | {s['age']} лет]</b>\n"]
+                            for idx, u in enumerate(users[:5], 1):
+                                name = f"{u.get('first_name')} {u.get('last_name')}"
+                                uid = u.get("id")
+                                about = u.get("interests") or u.get("about") or "без описания"
+                                out.append(f"<b>{idx}. {name}</b> (id{uid})\n<i>О себе: {about[:60]}...</i>\n👉 Взять: <code>/pick {uid} Познакомиться легко, позвать на кофе</code>\n")
+                            send_msg("\n".join(out))
+                    except Exception as e:
+                        send_msg(f"❌ Ошибка поиска: {e}")
+
+                # Кнопки быстрых действий
+                elif data == "menu_queue": handle_queue()
+                elif data == "menu_status": handle_status()
+                elif data == "menu_trends": handle_trends()
+                elif data == "menu_plan7": handle_plan7()
+                elif data == "menu_testimg": handle_testimg()
+                elif data == "menu_audit": handle_audit()
+                elif data == "menu_doctor": handle_doctor()
+                elif data == "menu_models": handle_models()
+                elif data == "menu_errors": handle_errors()
+
+                # Одобрение / отклонение черновиков
+                elif data.startswith("app_"):
                     _, d_id, v_idx = data.split("_")
                     execute_approval(int(d_id), int(v_idx))
                 elif data.startswith("rej_"):
@@ -254,6 +408,7 @@ def process_pager_updates():
                     execute_rejection(int(d_id))
                 continue
 
+            # Команды текстом
             m = u.get("message", {})
             if str(m.get("chat", {}).get("id", "")) != str(ADMIN_CHAT_ID):
                 continue
