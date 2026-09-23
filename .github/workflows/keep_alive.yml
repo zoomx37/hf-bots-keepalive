@@ -37,5 +37,5 @@ jobs:
           FB_SECRET_KEY: ${{ secrets.FB_SECRET_KEY }}
           MODEL_GEMINI: "gemini-3.8-flash"
           MODEL_OPENROUTER: "z-ai/glm-5.2:free"
-          VK_ENABLED: "false"
+          VK_ENABLED: "true"
         run: python agent.py
