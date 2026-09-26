@@ -33,18 +33,29 @@ CITIES_DB = {
 
 FIND_CACHE = {}
 
-# Стоп-слова коммерческих ботов, накрутчиков и спама
+# 1. Стоп-слова коммерции, ботов, рекламы и услуг
 SPAM_STOP_WORDS = [
+    "автобус", "махачкал", "такси", "грузоперевозк", "перевозк",
     "взаимн", "подписк", "youtube", "ютуб", "заработок", "доход", "крипт",
     "маникюр", "ресниц", "брови", "шугаринг", "кератин", "наращиван",
     "шоурум", "одежд", "эскорт", "интим", "массаж", "таро", "нумеролог",
-    "wildberries", "вайлдберриз", "ozon", "озон", "менеджер", "bot", "бот"
+    "wildberries", "вайлдберриз", "ozon", "озон", "менеджер", "bot", "бот",
+    "вацап", "whatsapp", "пишите на", "заказ", "доставка", "бронирован",
+    "ставь лайк", "кидай заявку", "хочешь в друзья", "добавь в друзья", "в подписчик"
 ]
 
-# Стоп-слова детности
+# 2. Стоп-слова детности
 KIDS_STOP_WORDS = [
     "мама", "мамочка", "сынок", "сыночек", "дочка", "доченька", "дети", "ребенок", "деток", "мать"
 ]
+
+# 3. Стоп-слова для имён (чтобы не попадали автобусы и организации)
+FAKE_NAMES = [
+    "автобус", "билет", "такси", "тур", "одежда", "ресницы", "маникюр",
+    "брови", "шоп", "магазин", "доставка", "цветы", "работа", "аренда"
+]
+
+PHONE_PATTERN = re.compile(r"(\+?[78]\s?\(?\d{3}\)?\s?\d{3}[-\s]?\d{2}[-\s]?\d{2}|\b89\d{9}\b)")
 
 def db():
     c = sqlite3.connect("agent.db")
@@ -76,28 +87,47 @@ def get_city_id(session, city_name: str) -> int:
     return 1
 
 def is_spam_or_bot(u: dict) -> bool:
-    """Детектор ботов, коммерции и накруток."""
-    full_info = (
-        f"{u.get('first_name','')} {u.get('last_name','')} "
-        f"{u.get('status','')} {u.get('about','')} {u.get('activities','')} "
-        f"{str(u.get('occupation',{}).get('name',''))}"
-    ).lower()
+    """Глубокий фильтр ботов, накруток, коммерческих аккаунтов и автобусов."""
+    first = str(u.get("first_name", "")).strip().lower()
+    last = str(u.get("last_name", "")).strip().lower()
+    status = str(u.get("status", "")).lower()
+    about = str(u.get("about", "")).lower()
+    activities = str(u.get("activities", "")).lower()
+    occupation = str(u.get("occupation", {}).get("name", "")).lower()
+    followers = u.get("followers_count", 0)
 
-    return any(w in full_info for w in SPAM_STOP_WORDS)
+    # 1. Проверка имени на коммерцию («Автобус Москва»)
+    if any(fake in first or fake in last for fake in FAKE_NAMES):
+        return True
+
+    # 2. Блогеры, фермы накрутки и медийные боты (как Сабина с 10к подписчиков)
+    if followers and int(followers) > 3500:
+        return True
+
+    combined_text = f"{first} {last} {status} {about} {activities} {occupation}"
+
+    # 3. Поиск номеров телефонов и вацапа
+    if PHONE_PATTERN.search(combined_text):
+        return True
+
+    # 4. Стоп-слова спама и коммерции
+    if any(w in combined_text for w in SPAM_STOP_WORDS):
+        return True
+
+    return False
 
 def has_kids(u: dict) -> bool:
-    """Проверка наличия детей в анкете."""
     full_info = f"{u.get('status','')} {u.get('about','')} {u.get('interests','')}".lower()
     return any(w in full_info for w in KIDS_STOP_WORDS)
 
 def is_relation_ok(u: dict) -> bool:
-    """Проверка семейного положения: исключаем замужних и занятых."""
+    """Исключаем замужних, помолвленных и тех, у кого есть пара."""
     rel = u.get("relation", 0)
-    # 2: есть друг, 3: помолвлена, 4: замужем, 7: влюблена, 8: в гражданском браке
+    # 2: есть парень, 3: помолвлена, 4: замужем, 7: влюблена, 8: гражданский брак
     if rel in [2, 3, 4, 7, 8]:
         return False
     status_lower = u.get("status", "").lower()
-    if any(w in status_lower for w in ["замужем", "люблю мужа", "есть парень", "занята"]):
+    if any(w in status_lower for w in ["замужем", "люблю мужа", "есть парень", "занята", "влюблена"]):
         return False
     return True
 
@@ -120,15 +150,14 @@ def search_vk_candidates(city_name: str, age_from: int, age_to: int, sex: str = 
     cid = get_city_id(session, city_name)
     sex_code = 1 if sex.lower() in ["ж", "f", "жен", "девушка", "девушки (ж)"] else (2 if sex.lower() in ["м", "m", "муж", "парень", "парни (м)"] else 0)
 
-    # Запрашиваем расширенную выборку из 60 профилей
     params = {
-        "count": 60,
+        "count": 80,  # Увеличена выборка для качественного отсева спама
         "city": cid,
         "country": 1,
         "age_from": age_from,
         "age_to": age_to,
         "has_photo": 1,
-        "fields": "city,bdate,about,interests,activities,music,about,status,relation,occupation,can_write_private_message"
+        "fields": "city,bdate,about,interests,activities,music,about,status,relation,occupation,followers_count,can_write_private_message"
     }
     if sex_code > 0:
         params["sex"] = sex_code
@@ -136,59 +165,55 @@ def search_vk_candidates(city_name: str, age_from: int, age_to: int, sex: str = 
     res = vkrate.vk_call(session, "users.search", **params)
     items = res.get("items", [])
 
-    # МНОГОУРОВНЕВАЯ ФИЛЬТРАЦИЯ
     clean_candidates = []
     vibe_clean = vibe.strip().lower()
-    
-    # Синонимы для йоги и фитнеса
+
+    # Синонимы для точного попадания в интерес
     vibe_synonyms = [vibe_clean]
-    if "йог" in vibe_clean:
-        vibe_synonyms = ["йог", "yoga", "стретч", "растяжк", "фитнес", "пилатес", "медитац", "спорт"]
-    elif "спорт" in vibe_clean:
-        vibe_synonyms = ["спорт", "фитнес", "зал", "тренировк", "бег"]
+    if "спорт" in vibe_clean or "йог" in vibe_clean:
+        vibe_synonyms = ["спорт", "фитнес", "зал", "тренировк", "бег", "растяжк", "стретч", "йог", "yoga", "пилатес"]
     elif "книг" in vibe_clean:
-        vibe_synonyms = ["книг", "литератур", "чтени", "психолог"]
+        vibe_synonyms = ["книг", "чтени", "литератур", "роман", "психолог"]
+    elif "музык" in vibe_clean or "вечерин" in vibe_clean:
+        vibe_synonyms = ["музык", "концерт", "рок", "техно", "dj", "клуб", "фестивал"]
 
     for u in items:
-        # 1. Пропускаем закрытые профили
         if u.get("is_closed", False):
             continue
-        # 2. Пропускаем тех, у кого закрыта личка
         if u.get("can_write_private_message") == 0:
             continue
-        # 3. Исключаем замужних и занятых
         if not is_relation_ok(u):
             continue
-        # 4. Исключаем спам-ботов, накрутку и коммерцию (Ютуб, ресницы и т.д.)
         if is_spam_or_bot(u):
             continue
-        # 5. Исключаем мам с детьми
         if has_kids(u):
             continue
 
-        # СКОРИНГ АНКЕТЫ
-        score = 0
         bio_text = f"{u.get('about','')} {u.get('interests','')} {u.get('activities','')} {u.get('status','')}".lower()
 
-        # Бонус за совпадение по вайбу/интересам
+        # Бонус за совпадение по вайбу
+        score = 0
         matched_vibe = False
         for syn in vibe_synonyms:
-            if syn in bio_text:
-                score += 15
+            if syn and syn in bio_text:
+                score += 20
                 matched_vibe = True
                 break
 
-        # Бонус за заполненную анкету (не пустая)
-        if len(bio_text.strip()) > 20:
-            score += 5
+        # Если анкета заполнена — плюс, пустые («без описания») получают штраф
+        if len(bio_text.strip()) > 15:
+            score += 10
+        else:
+            score -= 15  # Пустышки отсекаются вниз списка
+
         if u.get("relation") in [1, 6]:
-            score += 3
+            score += 5
 
         u["_score"] = score
         u["_matched_vibe"] = matched_vibe
         clean_candidates.append(u)
 
-    # Сортируем: сначала те, у кого в анкете РЕАЛЬНО найдена йога/интерес, затем заполненные
+    # Сортируем: сначала реальные девушки с совпадением по интересу и заполненным профилем
     clean_candidates.sort(key=lambda x: x["_score"], reverse=True)
 
     result = clean_candidates[:5]
