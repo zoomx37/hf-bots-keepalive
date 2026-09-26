@@ -11,7 +11,6 @@ import vkrate
 log = logging.getLogger("social")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "721042205")
 
-# Локальная база городов (0 лишних вызовов к API ВК!)
 CITIES_DB = {
     "москва": 1,
     "санкт-петербург": 2, "спб": 2,
@@ -33,6 +32,19 @@ CITIES_DB = {
 }
 
 FIND_CACHE = {}
+
+# Стоп-слова коммерческих ботов, накрутчиков и спама
+SPAM_STOP_WORDS = [
+    "взаимн", "подписк", "youtube", "ютуб", "заработок", "доход", "крипт",
+    "маникюр", "ресниц", "брови", "шугаринг", "кератин", "наращиван",
+    "шоурум", "одежд", "эскорт", "интим", "массаж", "таро", "нумеролог",
+    "wildberries", "вайлдберриз", "ozon", "озон", "менеджер", "bot", "бот"
+]
+
+# Стоп-слова детности
+KIDS_STOP_WORDS = [
+    "мама", "мамочка", "сынок", "сыночек", "дочка", "доченька", "дети", "ребенок", "деток", "мать"
+]
 
 def db():
     c = sqlite3.connect("agent.db")
@@ -63,6 +75,32 @@ def get_city_id(session, city_name: str) -> int:
         log.warning(f"Сбой поиска города: {e}")
     return 1
 
+def is_spam_or_bot(u: dict) -> bool:
+    """Детектор ботов, коммерции и накруток."""
+    full_info = (
+        f"{u.get('first_name','')} {u.get('last_name','')} "
+        f"{u.get('status','')} {u.get('about','')} {u.get('activities','')} "
+        f"{str(u.get('occupation',{}).get('name',''))}"
+    ).lower()
+
+    return any(w in full_info for w in SPAM_STOP_WORDS)
+
+def has_kids(u: dict) -> bool:
+    """Проверка наличия детей в анкете."""
+    full_info = f"{u.get('status','')} {u.get('about','')} {u.get('interests','')}".lower()
+    return any(w in full_info for w in KIDS_STOP_WORDS)
+
+def is_relation_ok(u: dict) -> bool:
+    """Проверка семейного положения: исключаем замужних и занятых."""
+    rel = u.get("relation", 0)
+    # 2: есть друг, 3: помолвлена, 4: замужем, 7: влюблена, 8: в гражданском браке
+    if rel in [2, 3, 4, 7, 8]:
+        return False
+    status_lower = u.get("status", "").lower()
+    if any(w in status_lower for w in ["замужем", "люблю мужа", "есть парень", "занята"]):
+        return False
+    return True
+
 def search_vk_candidates(city_name: str, age_from: int, age_to: int, sex: str = "ж", vibe: str = "") -> list:
     allowed, wait_min = vkrate.can_vk()
     if not allowed:
@@ -72,75 +110,91 @@ def search_vk_candidates(city_name: str, age_from: int, age_to: int, sex: str = 
     if not token:
         raise ValueError("VK_TOKEN не задан")
 
-    cache_key = f"{city_name.lower()}|{age_from}-{age_to}|{sex.lower()}"
+    cache_key = f"{city_name.lower()}|{age_from}-{age_to}|{sex.lower()}|{vibe.lower()}"
     now = time.time()
 
-    # 1. Проверяем 30-минутный кэш
-    if cache_key in FIND_CACHE and now - FIND_CACHE[cache_key][0] < 1800:
-        raw_users = FIND_CACHE[cache_key][1]
-    else:
-        session = vkrate.get_vk_session(token)
-        cid = get_city_id(session, city_name)
-        sex_code = 1 if sex.lower() in ["ж", "f", "жен", "девушка", "девушки (ж)"] else (2 if sex.lower() in ["м", "m", "муж", "парень", "парни (м)"] else 0)
+    if cache_key in FIND_CACHE and now - FIND_CACHE[cache_key][0] < 1200:
+        return FIND_CACHE[cache_key][1]
 
-        # Чистый поиск по городу без спорных фильтров
-        params = {
-            "count": 25,
-            "city": cid,
-            "country": 1,
-            "age_from": age_from,
-            "age_to": age_to,
-            "has_photo": 1,
-            "fields": "city,bdate,interests,activities,music,about,status"
-        }
-        if sex_code > 0:
-            params["sex"] = sex_code
+    session = vkrate.get_vk_session(token)
+    cid = get_city_id(session, city_name)
+    sex_code = 1 if sex.lower() in ["ж", "f", "жен", "девушка", "девушки (ж)"] else (2 if sex.lower() in ["м", "m", "муж", "парень", "парни (м)"] else 0)
 
-        res = vkrate.vk_call(session, "users.search", **params)
-        items = res.get("items", [])
-        raw_users = [u for u in items if not u.get("is_closed", True)]
-        if raw_users:
-            FIND_CACHE[cache_key] = (now, raw_users)
+    # Запрашиваем расширенную выборку из 60 профилей
+    params = {
+        "count": 60,
+        "city": cid,
+        "country": 1,
+        "age_from": age_from,
+        "age_to": age_to,
+        "has_photo": 1,
+        "fields": "city,bdate,about,interests,activities,music,about,status,relation,occupation,can_write_private_message"
+    }
+    if sex_code > 0:
+        params["sex"] = sex_code
 
-    if not raw_users:
-        return []
+    res = vkrate.vk_call(session, "users.search", **params)
+    items = res.get("items", [])
 
-    # 2. Интеллектуальный скоринг совпадения по вайбу через ИИ
-    if not vibe or vibe.lower() in ["спорт, юмор", "любой"]:
-        return raw_users[:5]
+    # МНОГОУРОВНЕВАЯ ФИЛЬТРАЦИЯ
+    clean_candidates = []
+    vibe_clean = vibe.strip().lower()
+    
+    # Синонимы для йоги и фитнеса
+    vibe_synonyms = [vibe_clean]
+    if "йог" in vibe_clean:
+        vibe_synonyms = ["йог", "yoga", "стретч", "растяжк", "фитнес", "пилатес", "медитац", "спорт"]
+    elif "спорт" in vibe_clean:
+        vibe_synonyms = ["спорт", "фитнес", "зал", "тренировк", "бег"]
+    elif "книг" in vibe_clean:
+        vibe_synonyms = ["книг", "литератур", "чтени", "психолог"]
 
-    profiles_text = "\n".join(
-        f"{i}. ID={u['id']} {u.get('first_name','')} {u.get('last_name','')}; "
-        f"Интересы: {u.get('interests','')}; Деятельность: {u.get('activities','')}; "
-        f"О себе: {u.get('about','')}; Статус: {u.get('status','')}"
-        for i, u in enumerate(raw_users[:12], 1)
-    )
+    for u in items:
+        # 1. Пропускаем закрытые профили
+        if u.get("is_closed", False):
+            continue
+        # 2. Пропускаем тех, у кого закрыта личка
+        if u.get("can_write_private_message") == 0:
+            continue
+        # 3. Исключаем замужних и занятых
+        if not is_relation_ok(u):
+            continue
+        # 4. Исключаем спам-ботов, накрутку и коммерцию (Ютуб, ресницы и т.д.)
+        if is_spam_or_bot(u):
+            continue
+        # 5. Исключаем мам с детьми
+        if has_kids(u):
+            continue
 
-    prompt = (
-        f"Искомый вайб / интересы: «{vibe}».\n\n"
-        f"Анкеты кандидатов:\n{profiles_text}\n\n"
-        "Выбери от 3 до 5 наиболее подходящих анкет по интересам. Ответ выведи СТРОГО в формате JSON-массива:\n"
-        '[{"id": 12345, "score": "9/10", "why": "увлекается йогой и здоровым образом жизни"}]'
-    )
+        # СКОРИНГ АНКЕТЫ
+        score = 0
+        bio_text = f"{u.get('about','')} {u.get('interests','')} {u.get('activities','')} {u.get('status','')}".lower()
 
-    try:
-        raw_llm = ask(prompt, system="Ты — сваха проекта 'Купидон'. Оцениваешь совпадение по вайбу.", max_tokens=400, temperature=0.3)
-        m = re.search(r"\[.*\]", raw_llm, re.DOTALL)
-        if m:
-            scored = json.loads(m.group(0))
-            scored_map = {item["id"]: item for item in scored if "id" in item}
-            selected = []
-            for u in raw_users:
-                if u["id"] in scored_map:
-                    u["match_score"] = scored_map[u["id"]].get("score", "8/10")
-                    u["match_why"] = scored_map[u["id"]].get("why", "Совпадение по интересам")
-                    selected.append(u)
-            if selected:
-                return selected
-    except Exception as e:
-        log.warning(f"Ошибка LLM-скоринга: {e}")
+        # Бонус за совпадение по вайбу/интересам
+        matched_vibe = False
+        for syn in vibe_synonyms:
+            if syn in bio_text:
+                score += 15
+                matched_vibe = True
+                break
 
-    return raw_users[:5]
+        # Бонус за заполненную анкету (не пустая)
+        if len(bio_text.strip()) > 20:
+            score += 5
+        if u.get("relation") in [1, 6]:
+            score += 3
+
+        u["_score"] = score
+        u["_matched_vibe"] = matched_vibe
+        clean_candidates.append(u)
+
+    # Сортируем: сначала те, у кого в анкете РЕАЛЬНО найдена йога/интерес, затем заполненные
+    clean_candidates.sort(key=lambda x: x["_score"], reverse=True)
+
+    result = clean_candidates[:5]
+    if result:
+        FIND_CACHE[cache_key] = (now, result)
+    return result
 
 def pick_candidate_task(uid: str, platform: str, task: str, name: str = ""):
     c = db()
