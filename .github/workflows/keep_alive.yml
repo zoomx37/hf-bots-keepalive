@@ -1,41 +1,51 @@
-name: Autonomous AI Agent
+name: Autonomous AI Agent Keep-Alive
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    # Запуск каждые 35 минут (Hugging Face не успеет уснуть)
+    - cron: '*/35 * * * *'
+  workflow_dispatch: # Кнопка для ручного запуска в любое время
 
 jobs:
-  run-agent:
+  ping-spaces:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: pip install requests huggingface_hub openai telethon vk_api pyyaml pillow beautifulsoup4
-
-      - name: Run Autonomous Agent
+      - name: Ping All 4 Hugging Face Spaces
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_BACKUP_KEYS: ${{ secrets.GEMINI_BACKUP_KEYS }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          TG_API_ID: ${{ secrets.TG_API_ID }}
-          TG_API_HASH: ${{ secrets.TG_API_HASH }}
-          TG_STRING_SESSION: ${{ secrets.TG_STRING_SESSION }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
-          VK_TOKEN: ${{ secrets.VK_TOKEN }}
-          VK_GROUP_TOKEN: ${{ secrets.VK_GROUP_TOKEN }}
-          FB_API_KEY: ${{ secrets.FB_API_KEY }}
-          FB_SECRET_KEY: ${{ secrets.FB_SECRET_KEY }}
-          MODEL_GEMINI: "gemini-3.8-flash"
-          MODEL_OPENROUTER: "z-ai/glm-5.2:free"
-          VK_ENABLED: "true"
-        run: python agent.py
+        run: |
+          echo "=========================================="
+          echo "⏰ ЗАПУСК БУДИЛЬНИКА ДЛЯ ВСЕХ 4 СПЕЙСОВ"
+          echo "=========================================="
+
+          # 1. Cupid Agent (Приватный спейс — пинг через API и прямой URL)
+          echo "1. Пинг cupid-agent..."
+          curl -s -o /dev/null -w "• cupid-agent (API): %{http_code}\n" \
+            -H "Authorization: Bearer $HF_TOKEN" \
+            https://huggingface.co/api/spaces/opion2008/cupid-agent || true
+
+          curl -s -o /dev/null -w "• cupid-agent (Direct): %{http_code}\n" \
+            -H "Authorization: Bearer $HF_TOKEN" \
+            https://opion2008-cupid-agent.hf.space/ || true
+
+          # 2. Cupidon (Основной бот знакомств)
+          echo "2. Пинг cupidon..."
+          curl -s -o /dev/null -w "• cupidon (/ping): %{http_code}\n" \
+            -H "Authorization: Bearer $HF_TOKEN" \
+            https://opion2008-cupidon.hf.space/ping || true
+
+          # 3. Rslaw Bot (Автоюрист)
+          echo "3. Пинг rslaw-bot..."
+          curl -s -o /dev/null -w "• rslaw-bot: %{http_code}\n" \
+            -H "Authorization: Bearer $HF_TOKEN" \
+            https://opion2008-rslaw-bot.hf.space/ || true
+
+          # 4. Criminal Bot (Уголовное право)
+          echo "4. Пинг criminal-bot..."
+          curl -s -o /dev/null -w "• criminal-bot: %{http_code}\n" \
+            -H "Authorization: Bearer $HF_TOKEN" \
+            https://opion2008-criminal-bot.hf.space/ || true
+
+          echo "=========================================="
+          echo "✅ Все 4 спейса успешно получили импульс бодрствования!"
+          echo "=========================================="
