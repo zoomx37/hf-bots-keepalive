@@ -1,13 +1,13 @@
-name: Autonomous AI Agent Keep-Alive
+name: Autonomous AI Agent Keep-Alive & Apinex Check-in
 
 on:
   schedule:
-    # Запуск каждые 35 минут (Hugging Face не успеет уснуть)
+    # Запуск каждые 35 минут (Hugging Face не успеет уснуть + поддержание чекина Apinex)
     - cron: '*/35 * * * *'
   workflow_dispatch: # Кнопка для ручного запуска в любое время
 
 jobs:
-  ping-spaces:
+  ping-and-checkin:
     runs-on: ubuntu-latest
     steps:
       - name: Ping All 4 Hugging Face Spaces
@@ -49,3 +49,33 @@ jobs:
           echo "=========================================="
           echo "✅ Все 4 спейса успешно получили импульс бодрствования!"
           echo "=========================================="
+
+      - name: Apinex Daily Check-in
+        env:
+          APINEX_API_KEY: ${{ secrets.APINEX_API_KEY }}
+        run: |
+          echo "=========================================="
+          echo "🔑 АВТОМАТИЧЕСКИЙ ЧЕКИН APINEX"
+          echo "=========================================="
+          if [ -n "$APINEX_API_KEY" ]; then
+            for endpoint in \
+              "https://api.apinex.bond/v1/airdrop/checkin" \
+              "https://api.apinex.bond/v1/checkin" \
+              "https://api.apinex.bond/v1/quests/checkin" \
+              "https://api.apinex.bond/v1/quests/claim" \
+              "https://api.apinex.bond/v1/airdrop/claim" \
+              "https://apinex.bond/api/airdrop/checkin" \
+              "https://apinex.bond/api/checkin"
+            do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
+                -H "Authorization: Bearer $APINEX_API_KEY" \
+                -H "Content-Type: application/json" \
+                -d '{"action":"checkin"}' || true)
+              echo "• Эндпоинт $endpoint -> Код ответа: $STATUS"
+            done
+            echo "=========================================="
+            echo "✅ Импульс чекина Apinex успешно отправлен!"
+            echo "=========================================="
+          else
+            echo "⚠️ Секрет APINEX_API_KEY не задан в GitHub Secrets."
+          fi
