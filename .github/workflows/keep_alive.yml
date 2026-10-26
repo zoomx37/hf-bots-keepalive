@@ -2,7 +2,7 @@ name: Autonomous AI Agent Keep-Alive & Apinex Check-in
 
 on:
   schedule:
-    # Запуск каждые 35 минут (Hugging Face не успеет уснуть + поддержание чекина Apinex)
+    # Запуск каждые 35 минут (оригинальный проверенный интервал)
     - cron: '*/35 * * * *'
   workflow_dispatch: # Кнопка для ручного запуска в любое время
 
@@ -74,7 +74,7 @@ jobs:
               echo "• Эндпоинт $endpoint -> Код ответа: $STATUS"
             done
             echo "=========================================="
-            echo "✅ Импульс чекина Apinex успешно отправлен!"
+            echo "✅ Импульс чекина Apinex отправлен!"
             echo "=========================================="
           else
             echo "⚠️ Секрет APINEX_API_KEY не задан в GitHub Secrets."
